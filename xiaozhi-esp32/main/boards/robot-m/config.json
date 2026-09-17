@@ -1,0 +1,12 @@
+{
+    "type": "robot-m",
+    "target": "esp32s3",
+    "builds": [
+        {
+            "name": "robot-m",
+            "sdkconfig_append": [
+                "CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y"
+            ]
+        }
+    ]
+}

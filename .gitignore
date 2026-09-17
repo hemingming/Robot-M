@@ -3,3 +3,13 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+src/wifi_secrets.h
+
+# macOS metadata and local editor settings.
+.DS_Store
+.vscode/settings.json
+
+# ESP-IDF build output and generated files.
+xiaozhi-esp32/build/
+xiaozhi-esp32/managed_components/
+xiaozhi-esp32/sdkconfig.old
