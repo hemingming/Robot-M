@@ -2,6 +2,7 @@
 #include <Wire.h>
 
 #include "robot_config.h"
+#include "robot_runtime.h"
 
 #if __has_include(<TFT_eSPI.h>)
 #include <TFT_eSPI.h>
@@ -14,6 +15,8 @@ static SFEVL53L1X g_tofSensor;
 #endif
 
 namespace {
+
+robot::RobotRuntime g_runtime;
 
 void initI2c() {
   Wire.begin(robot::kI2cSdaPin, robot::kI2cSclPin, robot::kI2cClockSpeed);
@@ -48,6 +51,17 @@ void initSensors() {
 #endif
 }
 
+void updateRuntime(uint32_t nowMs) {
+  robot::SensorSnapshot sensors;
+  sensors.batteryVoltage =
+      analogReadMilliVolts(robot::kBatteryVoltagePin) / 1000.0f;
+  g_runtime.update(nowMs, sensors);
+
+  if (g_runtime.modeChanged()) {
+    Serial.printf("Mode: %s\n", robot::robotModeName(g_runtime.mode()));
+  }
+}
+
 void printStatus() {
   const float batteryVoltage = analogReadMilliVolts(robot::kBatteryVoltagePin) / 1000.0f;
   Serial.printf("Battery: %.2f V\n", batteryVoltage);
@@ -69,6 +83,7 @@ void setup() {
   initI2c();
   initDisplay();
   initSensors();
+  g_runtime.begin(millis());
 
   Serial.println("Robot-M initialization complete.");
 }
@@ -79,6 +94,7 @@ void loop() {
 
   if (now - lastStatusMs >= robot::kStatusUpdateMs) {
     lastStatusMs = now;
+    updateRuntime(now);
     printStatus();
   }
 
