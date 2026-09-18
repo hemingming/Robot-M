@@ -29,6 +29,7 @@ public:
     virtual size_t GetFeedSize() const = 0;
 
     virtual void OnWakeWordDetected(std::function<void(const std::string& wake_word)> callback) = 0;
+    virtual void OnCommandDetected(std::function<void(const std::string& action)> callback) {}
     virtual void OnOutput(std::function<void(std::vector<int16_t>&& data)> callback) = 0;
     virtual void OnVadStateChange(std::function<void(bool speaking)> callback) = 0;
 

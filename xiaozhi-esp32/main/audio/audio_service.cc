@@ -99,6 +99,11 @@ void AudioService::Initialize(AudioCodec* codec) {
             callbacks_.on_wake_word_detected(wake_word);
         }
     });
+    audio_engine_->OnCommandDetected([this](const std::string& action) {
+        if (callbacks_.on_command_detected) {
+            callbacks_.on_command_detected(action);
+        }
+    });
 
     esp_timer_create_args_t audio_power_timer_args = {
         .callback =

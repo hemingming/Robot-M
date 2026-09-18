@@ -139,6 +139,10 @@ void CustomWakeWord::OnWakeWordDetected(std::function<void(const std::string& wa
     wake_word_detected_callback_ = callback;
 }
 
+void CustomWakeWord::OnCommandDetected(std::function<void(const std::string& action)> callback) {
+    command_detected_callback_ = callback;
+}
+
 void CustomWakeWord::Start() {
     running_ = true;
 }
@@ -200,6 +204,9 @@ void CustomWakeWord::FeedSamples(const int16_t* data, size_t samples, bool mono)
                     if (wake_word_detected_callback_) {
                         wake_word_detected_callback_(last_detected_wake_word_);
                     }
+                } else if (command_detected_callback_) {
+                    ESP_LOGI(TAG, "Action command detected: %s", command.action.c_str());
+                    command_detected_callback_(command.action);
                 }
             }
             multinet_->clean(multinet_model_data_);

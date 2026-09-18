@@ -1,5 +1,28 @@
 
 ## AI Robot-M
+#### 硬件架构配置
+
+```
+
+    电源：7.4V 2200mAh锂电池 ✅ -
+    稳压板：ML2596电源稳压板 -
+
+    主板：ESP32-S3-DEV-KIT-N32R16V-M -
+    主板集线器：IIC HUB模块 分线器 I2C集线器 ✅ -
+
+    舵机转换板：URT-2 ✅
+    总线舵机集线器： 舵机集线器 TTL分线板 ✅ -
+    12个飞特舵机：SC-0017-C001
+    步态平衡：601N16轴BMI323 ✅ -
+    障碍识别：TCRT5000红外反射传感器    ToF测距模块VL53L1X ✅ -
+
+    屏幕：4.0寸SPI串口 TFT液晶屏电容触摸屏 驱动IC ST7796S ✅ -
+    摄影头：ESP32串口转 带OV2640摄像头
+    麦克风：INMP441 ✅ -
+    音频：MAX98357 I2S 音频放大器 ✅ -
+    
+
+```
 
 ### Robot-M 开发与接线手册
 
@@ -92,6 +115,53 @@ python3 scripts/build.py robot-m --name robot-m
 - 小智：烧录后屏幕显示 UI，按提示配网，再说“你好，小智”测试唤醒和语音链路。
 - 舵机：当前代码只建立了 `actuators/` 和 `motion/` 接口，尚未自动发送动作指令。
 
+##### TCRT5000 红外传感器接线与测试
+
+当前 Arduino/PlatformIO 固件读取两个 TCRT5000 模块的数字输出 `DO`：
+
+| 模块引脚 | 左侧模块 | 右侧模块 | 说明 |
+| --- | --- | --- | --- |
+| `VCC` | 3.3V | 3.3V | 两个模块都使用 ESP32 的 3.3V |
+| `GND` | GND | GND | 必须与 ESP32 共地 |
+| `DO` | GPIO14 | GPIO21 | 数字比较器输出，固件周期性打印状态 |
+| `AO` | 暂不接 | 暂不接 | 当前固件不读取模拟输出 |
+
+接线示意：
+
+```text
+3.3V  ──┬── 左侧 TCRT5000 VCC
+    └── 右侧 TCRT5000 VCC
+
+GND   ──┬── 左侧 TCRT5000 GND
+    └── 右侧 TCRT5000 GND
+
+GPIO14 ───── 左侧 TCRT5000 DO
+GPIO21 ───── 右侧 TCRT5000 DO
+```
+
+烧录 Arduino 固件后，打开串口监视器：
+
+```bash
+export PATH="$HOME/Library/Python/3.14/bin:$PATH"
+cd /Users/hemingming/worker/Robot-M
+pio device monitor --port /dev/cu.usbmodem5B900929761 --baud 115200
+```
+
+串口会周期性显示：
+
+```text
+TCRT5000: left=1 right=1
+```
+
+测试步骤：
+
+1. 用手或黑色物体靠近左侧传感器，观察 `left` 是否变化。
+2. 用手或黑色物体靠近右侧传感器，观察 `right` 是否变化。
+3. 分别调节两个模块上的电位器，使靠近和移开时 `DO` 能稳定切换。
+4. 部分模块是低电平触发，`1 -> 0` 可能表示检测到物体；以实际变化为准。
+
+如果状态不变化，依次检查 `VCC`、`GND`、对应 `DO` GPIO、模块指示灯和电位器。USB 重插后串口名称可能变化，可先执行 `pio device list` 查看当前端口。
+
 #### ESP32-S3 GPIO 完整映射
 
 以下表格以当前 `src/config/pin_def.h` 和 `xiaozhi-esp32/main/boards/robot-m/config.h` 为准。GPIO 数字是 ESP32-S3 管脚编号，不是排针位置编号。
@@ -135,8 +205,8 @@ python3 scripts/build.py robot-m --name robot-m
 | --- | --- | --- |
 | `VDD` | 3.3V | 不能接 5V |
 | `GND` | GND | 必须共地 |
-| `SCK` | GPIO17 | 与功放 BCLK 共用 |
-| `WS` | GPIO18 | 与功放 LRC/WS 共用 |
+| `SCK` | GPIO1 | 麦克风独立 BCLK，不能与功放共用 |
+| `WS` | GPIO2 | 麦克风独立 WS，不能与功放共用 |
 | `SD` | GPIO16 | 麦克风串行数据输出 |
 | `L/R` | GND | 选择左声道；固件使用 `ONLY_LEFT` |
 
@@ -146,8 +216,8 @@ python3 scripts/build.py robot-m --name robot-m
 | --- | --- | --- |
 | `VIN` | 稳定 5V | 功放电源 |
 | `GND` | GND | 与 ESP32 共地 |
-| `BCLK` | GPIO17 | 与 INMP441 SCK 共用 |
-| `LRC/WS` | GPIO18 | 与 INMP441 WS 共用 |
+| `BCLK` | GPIO17 | 功放独立 BCLK |
+| `LRC/WS` | GPIO18 | 功放独立 WS |
 | `DIN` | GPIO15 | 功放音频数据输入 |
 | `SD` | 3.3V | 拉高使功放保持开启 |
 | `GAIN` | 暂时悬空 | 按模块默认增益工作 |
@@ -176,11 +246,22 @@ python3 scripts/build.py robot-m --name robot-m
 | 设备 | 当前连接状态 |
 | --- | --- |
 | 12 个 SC-0017-C001 总线舵机 | 电源板 `VADJ+` -> URT-2/舵机集线器电源+；电源板 GND -> 集线器 GND；ESP32 GND -> URT-2 信号地 |
-| URT-2 信号 TX/RX | GPIO 尚未最终确认，当前固件不会发送舵机动作指令 |
+| URT-2 信号 TX/RX | 默认 `TX -> GPIO19`、`RX -> GPIO20`、1000000 8N1；接线前按 URT-2 丝印确认并可在 `src/config/pin_def.h` 修改 |
 | 舵机电源 | 不得从 ESP32 5V/3.3V 取电；先断开舵机负载，用万用表将 `VADJ` 调到舵机额定电压 |
 | OV2640 摄像头 | 硬件已列入规划，但当前 Robot-M 自定义板配置未定义摄像头 GPIO |
 
-未确认的 GPIO 不要自行猜测后接入。尤其是 URT-2 的串口方向、波特率、舵机 ID、零位和电源电压，必须先根据板卡手册确认。
+驱动已完成 UART 初始化、SCS/SMS 舵机 Ping、单舵机目标位置发送和广播停扭力；启动时不会自动移动。首次测试只接 1 个舵机，先确认 ID 和零位，再逐步接入其余舵机。当前默认 `TX=GPIO19`、`RX=GPIO20`、1000000 8N1；如果 URT-2 丝印或手册不同，必须修改配置后再烧录。
+
+串口测试命令（每条命令后按回车）：
+
+```text
+servo ping 1
+servo scan 1 20
+servo move 1 2048 500 10
+servo stop
+```
+
+`servo scan 1 20` 会扫描 ID 1 到 20；也可以省略范围，默认扫描 1 到 20。扫描只发送 Ping，不会移动舵机。位置范围为 `0..4095`，速度和加速度必须先使用较小值测试。第一次只接一个舵机，并让舵机机械结构处于安全、无负载位置；确认 `ping` 成功后，再执行 `move`。
 
 #### Wi-Fi 配置
 
@@ -213,35 +294,126 @@ constexpr char kPassword[] = "你的WiFi密码";
 | `idf.py: command not found` | 在小智目录先执行 `source /Users/hemingming/esp/esp-idf/export.sh` |
 | 小智字体反着 | 检查 `DISPLAY_MIRROR_X/Y` 和 `DISPLAY_SWAP_XY`，当前正确值为 `false/true/false` |
 | 屏幕花屏 | 检查 SPI GPIO、CS/DC/RST、供电、共地，以及是否烧录了对应的 Robot-M 板卡配置 |
-| 麦克风无响应 | 检查 INMP441 的 3.3V、GND、GPIO17、GPIO18、GPIO16 和 `L/R -> GND` |
+| 麦克风无响应 | 检查 INMP441 的 3.3V、GND、GPIO1、GPIO2、GPIO16 和 `L/R -> GND` |
 | 功放无声音 | 检查 MAX98357A 的 5V、共地、GPIO15、`SD -> 3.3V` 和喇叭接线 |
 | I2C 设备未发现 | 检查 GPIO38/39、地址、上拉、电源和 GND；不要把 SDA/SCL 接反 |
 | 烧录连接失败 | 先确认串口路径；必要时按住 BOOT，短按 EN/RESET，再松开 BOOT 后重试 |
 
 
-#### 硬件架构配置
 
+### SCS0017 舵机与 URT-2 测试
+
+包装标注为 `SCS0017`，属于 **SCS 系列**，不是 SMS 系列：
+
+| 参数 | 范围/值 | 说明 |
+| --- | --- | --- |
+| 协议 | `SCSCL` | 飞特 SCS 系列串口总线协议 |
+| 默认波特率 | `1000000 8N1` | SCS 系列默认波特率 |
+| 额定电压 | `6.0V` / `7.4V` | 按实际电源板设置，不能接 ESP32 3.3V |
+| 位置 | `0..1023` | `512` 约为中位 |
+| 速度 | `0..1023` | 数值越大通常越快，先用小值测试 |
+| 加速度 | `0..255` | 当前 SCSCL `WritePosEx` 实现不使用该值，保留为接口参数 |
+| 默认 ID | 通常为 `1` | 多个舵机接入前必须逐个设置唯一 ID |
+
+当前 Arduino 驱动使用 `SCSCL` 协议类，位置命令示例：
+
+```text
+servo move 1 512 100 2  //id 位置  速度  加速度
 ```
 
-    电源：7.4V 2200mAh锂电池 ✅ -
-    稳压板：ML2596电源稳压板 -
+#### URT-2 接线
 
-    主板：ESP32-S3-DEV-KIT-N32R16V-M -
-    主板集线器：IIC HUB模块 分线器 I2C集线器 ✅ -
+URT-2 顶部五针从左到右为：
 
-    舵机转换板：URT-2 ✅
-    总线舵机集线器： 舵机集线器 TTL分线板 ✅ -
-    12个飞特舵机：SC-0017-C001
-    步态平衡：601N16轴BMI323 ✅ -
-    障碍识别：TCRT5000红外反射传感器    ToF测距模块VL53L1X ✅ -
-
-    屏幕：4.0寸SPI串口 TFT液晶屏电容触摸屏 驱动IC ST7796S ✅ -
-    摄影头：ESP32串口转 带OV2640摄像头
-    麦克风：INMP441 ✅ -
-    音频：MAX98357 I2S 音频放大器 ✅ -
-    
-
+```text
+DTR | GND | >5V | RXD | TXD
 ```
+
+ESP32-S3 连接：
+
+```text
+URT-2 DTR  -> 不接
+URT-2 GND  -> ESP32 GND
+URT-2 >5V  -> 稳定 5V 逻辑电源
+URT-2 RXD  -> ESP32 GPIO19 TX
+URT-2 TXD  -> ESP32 GPIO20 RX
+```
+
+URT-2 电平选择拨到 `3V3`。舵机接 URT-2 白色 `G/V1/S` 的 SCS 接口，不要接蓝色 `RS485-Bus` 接口。舵机动力电源使用 `VADJ`，不能从 ESP32 的 5V 或 3.3V 取电；ESP32、URT-2 和舵机电源必须共地。
+
+#### 测试命令
+
+先编译并烧录 Arduino 固件：
+
+```bash
+export PATH="$HOME/Library/Python/3.14/bin:$PATH"
+cd /Users/hemingming/worker/Robot-M
+pio run
+pio run --target upload
+```
+
+打开串口监视器：
+
+```bash
+pio device monitor --port /dev/cu.usbmodem5B900929761 --baud 115200
+```
+
+以下命令必须输入到**串口监视器窗口**，不能在普通 Bash 终端执行：
+
+```text
+servo ping 1
+servo scan 1 20
+servo setid 1 2
+servo move 1 512 100 2
+servo stop
+```
+
+命令说明：
+
+| 命令 | 作用 |
+| --- | --- |
+| `servo ping <id>` | 检查指定 ID 的舵机是否响应 |
+| `servo scan [first] [last]` | 扫描舵机 ID，默认范围为 1 到 20，只发送 Ping 不移动 |
+| `servo setid <old> <new>` | 修改舵机 ID；写入前解锁 EEPROM，写入后加锁 |
+| `servo move <id> <position> <speed> <acc>` | 控制单个舵机移动；SCS0017 位置范围为 0 到 1023 |
+| `servo stop` | 广播关闭扭力，停止保持力矩 |
+
+#### ID 分配流程
+
+每次只接一个舵机。默认舵机通常是 ID `1`：
+
+```text
+第1个舵机：保留 ID 1
+第2个舵机：servo setid 1 2
+第3个舵机：servo setid 1 3
+第4个舵机：servo setid 1 4
+...
+第12个舵机：servo setid 1 12
+```
+
+每次 `setid` 成功后给舵机断电，再换下一个未配置舵机。全部完成后接入总线并执行：
+
+```text
+servo scan 1 20
+```
+
+建议的功能映射：
+
+```text
+ID 1..6   两条腿，每条 3 个舵机
+ID 7..10  两条胳膊，每条 2 个舵机
+ID 11..12 屏幕的 2 个舵机
+```
+
+首次测试只接一个舵机，并确认 `servo ping` 成功后再执行 `servo move`。舵机周围应无负载、无卡死风险；发现异常立即输入 `servo stop` 或断开舵机动力电源。
+
+如果 USB 重插后串口名称变化，先执行：
+
+```bash
+pio device list
+```
+
+再把 `--port` 后面的路径替换为当前实际端口。
 ```rust
 
 ```
@@ -252,12 +424,6 @@ constexpr char kPassword[] = "你的WiFi密码";
     ESP32 3.3V   -> HUB VCC  红
     ESP32 GND    -> HUB GND  黑
 
-
-    BMI323：
-        CS -> 3.3V
-        SA0 -> GND
-```
-```
 
 #### 当前显示屏接线
 
@@ -286,8 +452,8 @@ constexpr char kPassword[] = "你的WiFi密码";
 | --- | --- |
 | VDD | 3.3V |
 | GND | GND |
-| SCK | GPIO17 |
-| WS | GPIO18 |
+| SCK | GPIO1 |
+| WS | GPIO2 |
 | SD | GPIO16 |
 | L/R | GND |
 
@@ -305,7 +471,7 @@ constexpr char kPassword[] = "你的WiFi密码";
 | 喇叭 `+` | 喇叭正极 |
 | 喇叭 `-` | 喇叭负极 |
 
-注意：INMP441 使用 3.3V，MAX98357A 的 VIN 使用 5V；两个模块必须与 ESP32 共地。MAX98357A 的 `SD` 是启停控制脚，接 3.3V 使功放保持开启；`DIN` 才是音频数据输入。喇叭直接接功放的 `+` 和 `-`，不能把任一喇叭端接 ESP32 GND。`GAIN` 暂时悬空。GPIO17、GPIO18 为麦克风和功放共用的时钟线，GPIO16 只接麦克风数据，GPIO15 只接功放数据。
+注意：INMP441 使用 3.3V，MAX98357A 的 VIN 使用 5V；两个模块必须与 ESP32 共地。MAX98357A 的 `SD` 是启停控制脚，接 3.3V 使功放保持开启；`DIN` 才是音频数据输入。喇叭直接接功放的 `+` 和 `-`，不能把任一喇叭端接 ESP32 GND。`GAIN` 建议接 GND。小智固件中 GPIO17/18 只给功放使用，GPIO1/2 只给麦克风使用，GPIO16 只接麦克风数据，GPIO15 只接功放数据。
 
 #### 舵机供电
 
@@ -402,7 +568,7 @@ Robot-M/
 小智使用的硬件映射：
 
 ```text
-INMP441:   SCK/WS/SD = GPIO17/GPIO18/GPIO16
+INMP441:   SCK/WS/SD = GPIO1/GPIO2/GPIO16
 MAX98357A: BCLK/LRC/DIN = GPIO17/GPIO18/GPIO15
 ST7796S:   SCK/MOSI/MISO/CS/DC/RST = GPIO12/11/13/10/9/8
 ```

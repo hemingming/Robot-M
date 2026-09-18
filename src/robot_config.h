@@ -29,6 +29,9 @@ constexpr uint8_t kMicrophoneDataPin = pins::kMicrophoneData;
 constexpr uint8_t kSpeakerDataPin = pins::kSpeakerData;
 constexpr uint8_t kTcrtLeftDigitalPin = pins::kTcrtLeftDigital;
 constexpr uint8_t kTcrtRightDigitalPin = pins::kTcrtRightDigital;
+constexpr uint8_t kServoUartTxPin = pins::kServoUartTx;
+constexpr uint8_t kServoUartRxPin = pins::kServoUartRx;
+constexpr uint32_t kServoUartBaud = pins::kServoUartBaud;
 
 // I2C 传感器地址集中维护，后续接入驱动时不要在业务代码中重复写数字。
 constexpr uint8_t kImuAddress = 0x68;

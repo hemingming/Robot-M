@@ -82,6 +82,9 @@ void Application::Initialize() {
     callbacks.on_wake_word_detected = [this](const std::string& wake_word) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_WAKE_WORD_DETECTED);
     };
+    callbacks.on_command_detected = [this](const std::string& action) {
+        ESP_LOGI(TAG, "Robot action command: %s", action.c_str());
+    };
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };

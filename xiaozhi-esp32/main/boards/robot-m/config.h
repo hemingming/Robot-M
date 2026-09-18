@@ -4,14 +4,14 @@
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
 
-// 音频硬件：INMP441 麦克风与 MAX98357A 功放共用 BCLK/WS，数据线分别接 GPIO16/15。
+// 音频硬件：麦克风和功放使用独立的 I2S 时钟，避免两个控制器争用同一组 BCLK/WS。
 #define AUDIO_INPUT_SAMPLE_RATE 16000
 #define AUDIO_OUTPUT_SAMPLE_RATE 24000
 #define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_17
 #define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_18
 #define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_15
-#define AUDIO_I2S_MIC_GPIO_SCK GPIO_NUM_17
-#define AUDIO_I2S_MIC_GPIO_WS GPIO_NUM_18
+#define AUDIO_I2S_MIC_GPIO_SCK GPIO_NUM_1
+#define AUDIO_I2S_MIC_GPIO_WS GPIO_NUM_2
 #define AUDIO_I2S_MIC_GPIO_DIN GPIO_NUM_16
 
 // ESP32-S3 标准 BOOT 键；音量键未接入，因此使用 GPIO_NC。

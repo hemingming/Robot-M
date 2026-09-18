@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <SCSCL.h>
 
 namespace robot::actuators {
 
@@ -16,9 +17,13 @@ class ServoBus {
   void begin();
   void stopAll();
   bool sendTarget(const ServoTarget& target);
+  bool ping(uint8_t id);
+  bool setId(uint8_t currentId, uint8_t newId);
   bool healthy() const;
 
  private:
+  HardwareSerial serial_{1};
+  SCSCL servo_{};
   bool healthy_ = false;
 };
 

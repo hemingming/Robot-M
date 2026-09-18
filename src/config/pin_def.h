@@ -33,4 +33,48 @@ constexpr uint8_t kSpeakerData = 15;
 constexpr uint8_t kTcrtLeftDigital = 14;
 constexpr uint8_t kTcrtRightDigital = 21;
 
+// URT-2 UART：默认使用未被当前外设占用的 GPIO19/20；接线前请按 URT-2 丝印确认 TX/RX。
+constexpr uint8_t kServoUartTx = 19;
+constexpr uint8_t kServoUartRx = 20;
+// SC/SMS 系列舵机和 SCServo 示例默认使用 1 Mbps。
+constexpr uint32_t kServoUartBaud = 1000000;
+
+// 外接离线 ASR 模组使用独立 UART；模组 TX 接 ESP32 RX，模组 RX 接 ESP32 TX。
+constexpr uint8_t kAsrUartTx = 41;
+constexpr uint8_t kAsrUartRx = 40;
+
+// N32R16V 的 Octal Flash/PSRAM 占用 GPIO33~37，这些引脚禁止分配给任何外设。
+constexpr uint8_t kOctalBusReservedFirst = 33;
+constexpr uint8_t kOctalBusReservedLast = 37;
+
+namespace detail {
+constexpr bool isOctalBusReserved(uint8_t pin) {
+  return pin >= kOctalBusReservedFirst && pin <= kOctalBusReservedLast;
+}
+}  // namespace detail
+
+static_assert(!detail::isOctalBusReserved(kBatteryVoltage) &&
+                  !detail::isOctalBusReserved(kPowerEnable) &&
+                  !detail::isOctalBusReserved(kI2cSda) &&
+                  !detail::isOctalBusReserved(kI2cScl) &&
+                  !detail::isOctalBusReserved(kDisplayMosi) &&
+                  !detail::isOctalBusReserved(kDisplayMiso) &&
+                  !detail::isOctalBusReserved(kDisplaySclk) &&
+                  !detail::isOctalBusReserved(kDisplayCs) &&
+                  !detail::isOctalBusReserved(kDisplayDc) &&
+                  !detail::isOctalBusReserved(kDisplayRst) &&
+                  !detail::isOctalBusReserved(kTouchInt) &&
+                  !detail::isOctalBusReserved(kTouchRst) &&
+                  !detail::isOctalBusReserved(kAudioBclk) &&
+                  !detail::isOctalBusReserved(kAudioLrclk) &&
+                  !detail::isOctalBusReserved(kMicrophoneData) &&
+                  !detail::isOctalBusReserved(kSpeakerData) &&
+                  !detail::isOctalBusReserved(kTcrtLeftDigital) &&
+                  !detail::isOctalBusReserved(kTcrtRightDigital) &&
+                  !detail::isOctalBusReserved(kServoUartTx) &&
+                  !detail::isOctalBusReserved(kServoUartRx) &&
+                  !detail::isOctalBusReserved(kAsrUartTx) &&
+                  !detail::isOctalBusReserved(kAsrUartRx),
+              "GPIO33~37 被 Octal Flash/PSRAM 占用，禁止分配给外设");
+
 }  // namespace robot::pins
