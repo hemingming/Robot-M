@@ -686,6 +686,18 @@ def read_custom_wake_word_from_sdkconfig(sdkconfig_path):
     return None
 
 
+def read_offline_commands_from_sdkconfig(sdkconfig_path):
+    with open(sdkconfig_path, encoding='utf-8') as config_file:
+        enabled = any(line.strip() == 'CONFIG_OFFLINE_VOICE=y' for line in config_file)
+    if not enabled:
+        return []
+    return [
+        {'command': 'yin liang da yi dian', 'text': '\u97f3\u91cf\u5927\u4e00\u70b9', 'action': 'volume_up'},
+        {'command': 'yin liang xiao yi dian', 'text': '\u97f3\u91cf\u5c0f\u4e00\u70b9', 'action': 'volume_down'},
+        {'command': 'ting zhi dong zuo', 'text': '\u505c\u6b62\u52a8\u4f5c', 'action': 'stop'},
+    ]
+
+
 def get_language_from_multinet_models(multinet_models):
     """
     Determine language from multinet model names
@@ -994,6 +1006,10 @@ def main():
             ]
         }
         print(f"  custom wake word: {custom_wake_word_config['wake_word']} ({custom_wake_word_config['display']})")
+        offline_commands = read_offline_commands_from_sdkconfig(args.sdkconfig)
+        if offline_commands and language != 'cn':
+            raise ValueError("Offline voice commands require a Chinese MultiNet model")
+        multinet_model_info['commands'].extend(offline_commands)
         print(f"  wake word language: {language}")
         print(f"  wake word threshold: {custom_wake_word_config['threshold']}")
     

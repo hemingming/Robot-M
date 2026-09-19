@@ -1,17 +1,18 @@
 #ifndef _APPLICATION_H_
 #define _APPLICATION_H_
 
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
-#include <esp_timer.h>
 
-#include <string>
-#include <mutex>
-#include <deque>
-#include <memory>
-#include <functional>
+#include <atomic>
 #include <cstdint>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <vector>
 
 #include "protocol.h"
@@ -36,6 +37,9 @@
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
 #define MAIN_EVENT_PLAYBACK_DRAINED     (1 << 13)
+#define MAIN_EVENT_LOCAL_VOLUME_UP      (1 << 14)
+#define MAIN_EVENT_LOCAL_VOLUME_DOWN    (1 << 15)
+#define MAIN_EVENT_LOCAL_STOP           (1 << 16)
 
 
 enum AecMode {
@@ -70,7 +74,9 @@ public:
 
     DeviceState GetDeviceState() const { return state_machine_.GetState(); }
     bool IsVoiceDetected() const { return audio_service_.IsVoiceDetected(); }
-    
+    uint32_t GetMotionEpoch() const { return motion_epoch_.load(); }
+    bool IsNetworkConnected() const { return network_connected_.load(); }
+
     /**
      * Request state transition
      * Returns true if transition was successful
@@ -153,7 +159,12 @@ private:
     bool pending_listening_start_ = false;  // Waiting for playback to drain before starting listening (auto mode)
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
-
+    std::atomic<bool> network_connected_{false};
+    std::atomic<uint32_t> motion_epoch_{0};
+    bool local_assets_loaded_ = false;
+    bool offline_prompt_playing_ = false;
+    bool offline_prompt_queued_ = false;
+    int64_t local_command_time_ = 0;
 
     // Event handlers
     void HandleStateChangedEvent();
@@ -164,6 +175,9 @@ private:
     void HandleNetworkDisconnectedEvent();
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
+    void PlayOfflinePrompt();
+    void FinishOfflinePrompt();
+    void HandleLocalCommand(const char* action);
     void ContinueOpenAudioChannel(ListeningMode mode);
     void BeginWakeWordInvoke(const std::string& wake_word);
     void ContinueWakeWordInvoke(const std::string& wake_word);

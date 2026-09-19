@@ -161,6 +161,10 @@ void WifiBoard::SetNetworkEventCallback(NetworkEventCallback callback) {
 
 void WifiBoard::OnWifiConnectTimeout(void* arg) {
     auto* board = static_cast<WifiBoard*>(arg);
+#if CONFIG_OFFLINE_VOICE
+    ESP_LOGW(TAG, "WiFi unavailable, keeping local voice and background reconnection active");
+    return;
+#endif
     ESP_LOGW(TAG, "WiFi connection timeout, entering config mode");
 
     WifiManager::GetInstance().StopStation();

@@ -3,6 +3,7 @@
 
 #include <driver/gpio.h>
 #include <driver/spi_master.h>
+#include <driver/uart.h>
 
 // 音频硬件：麦克风和功放使用独立的 I2S 时钟，避免两个控制器争用同一组 BCLK/WS。
 #define AUDIO_INPUT_SAMPLE_RATE 16000
@@ -47,5 +48,11 @@
 #define I2C_SCL_PIN GPIO_NUM_39
 #define TOUCH_INT_PIN GPIO_NUM_7
 #define TOUCH_RST_PIN GPIO_NUM_6
+
+// URT-2 舵机总线：与 PlatformIO 固件的 src/config/pin_def.h 保持一致的 GPIO 和波特率。
+#define SERVO_UART_PORT UART_NUM_1
+#define SERVO_UART_TX_PIN GPIO_NUM_19
+#define SERVO_UART_RX_PIN GPIO_NUM_20
+#define SERVO_UART_BAUD_RATE 1000000
 
 #endif  // _ROBOT_M_BOARD_CONFIG_H_

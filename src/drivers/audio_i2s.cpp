@@ -56,16 +56,12 @@ void initAudio() {
                 robot::kMicrophoneDataPin, robot::kSpeakerDataPin);
 }
 
-void playAudioTestTone() {
-  if (!robot::kSpeakerEnabled) {
-    return;
-  }
+namespace {
 
-  // 用短促 440 Hz 正弦波验证功放、I2S 时钟和数据线，不作为持续播放接口。
+// 单频正弦波播放，供测试音和唤醒提示音共用。
+void playTone(float frequencyHz, uint32_t durationMs, float amplitude) {
   constexpr uint32_t sampleRate = 16000;
-  constexpr uint32_t sampleCount = sampleRate * 300 / 1000;
-  constexpr float frequencyHz = 440.0f;
-  constexpr float amplitude = 0.18f;
+  const uint32_t sampleCount = sampleRate * durationMs / 1000;
   int32_t samples[256];
   size_t writtenBytes = 0;
 
@@ -78,7 +74,29 @@ void playAudioTestTone() {
     i2s_write(I2S_NUM_0, samples, blockLength * sizeof(samples[0]),
               &writtenBytes, portMAX_DELAY);
   }
+}
+
+}  // namespace
+
+void playAudioTestTone() {
+  if (!robot::kSpeakerEnabled) {
+    return;
+  }
+
+  // 用短促 440 Hz 正弦波验证功放、I2S 时钟和数据线，不作为持续播放接口。
+  playTone(440.0f, 300, 0.18f);
   Serial.println("I2S speaker test tone sent.");
+}
+
+void playWakeChirp() {
+  if (!robot::kSpeakerEnabled) {
+    return;
+  }
+
+  // 两段上扬短音，区别于测试音，用来提示唤醒词已被识别。
+  playTone(880.0f, 80, 0.2f);
+  playTone(1320.0f, 80, 0.2f);
+  Serial.println("I2S wake chirp sent.");
 }
 
 uint32_t readMicrophoneLevel() {

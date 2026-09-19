@@ -150,6 +150,23 @@ void initPower() {
 
 void initAsr() {
   g_asrUart.onAction([](robot::voice::AsrAction action) {
+    // 唤醒词和停止指令始终生效；其余动作指令必须在唤醒/行走窗口内才会被执行，
+    // 避免 ASR 模块把环境噪音误识别成动作指令时机器人擅自动作。
+    if (action == robot::voice::AsrAction::Wake) {
+      g_runtime.noteWakeWord(millis());
+      robot::drivers::playWakeChirp();
+      Serial.println("ASR wake word detected, listening window opened.");
+      return;
+    }
+    if (action == robot::voice::AsrAction::Stop) {
+      g_limbController.stop();
+      g_runtime.requestMode(robot::RobotMode::EmergencyStop);
+      return;
+    }
+    if (!g_runtime.isAwake()) {
+      Serial.println("ASR action ignored: robot not woken up yet.");
+      return;
+    }
     switch (action) {
       case robot::voice::AsrAction::Forward:
         g_limbController.startForward();
@@ -163,13 +180,12 @@ void initAsr() {
         g_limbController.startTurnRight();
         g_runtime.requestMode(robot::RobotMode::Walking);
         break;
-      case robot::voice::AsrAction::Stop:
-        g_limbController.stop();
-        g_runtime.requestMode(robot::RobotMode::EmergencyStop);
-        break;
       case robot::voice::AsrAction::Stand:
         g_limbController.stand();
         g_runtime.requestMode(robot::RobotMode::Standby);
+        break;
+      case robot::voice::AsrAction::Wake:
+      case robot::voice::AsrAction::Stop:
         break;
     }
   });

@@ -6,6 +6,7 @@
 namespace robot::voice {
 
 enum class AsrAction : uint8_t {
+  Wake,
   Forward,
   TurnLeft,
   TurnRight,

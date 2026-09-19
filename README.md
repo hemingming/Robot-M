@@ -39,7 +39,7 @@
 
 在仓库根目录执行。需要先安装 PlatformIO，并确认 `pio` 已加入终端 `PATH`。
 
-```bash
+```sh
 cd /Users/hemingming/worker/Robot-M
 
 # 编译当前 Arduino 固件
@@ -47,7 +47,7 @@ pio run
 
 # 连接 ESP32 后烧录；也可以追加 --upload-port 指定串口
 pio run --target upload
-# pio run --target upload --upload-port /dev/cu.usbmodemXXXX
+# pio run --target upload --upload-port /dev/cu.usbmodem5B900929761
 
 # 打开 115200 波特率串口监视器
 pio device monitor --baud 115200
@@ -59,26 +59,31 @@ PlatformIO 固件没有独立的“启动命令”。烧录后 ESP32 复位，Ar
 
 小智工程要求 ESP-IDF 6.0.1 或更高版本，当前推荐 ESP-IDF 6.1。每次打开新终端都要先加载 ESP-IDF 环境：
 
-```bash
+```sh
 cd /Users/hemingming/worker/Robot-M/xiaozhi-esp32
 source /Users/hemingming/esp/esp-idf/export.sh
 ```
 
 编译 Robot-M 小智固件：
 
-```bash
+```sh
 python3 scripts/build.py robot-m --name robot-m
 ```
 
 看到 `Project build complete` 表示编译成功。指定串口烧录完整固件：
 
-```bash
+```sh
 idf.py -p /dev/cu.usbmodemXXXX flash
+```
+
+烧录后直接查看日志，可以合并成一条命令：
+```sh
+idf.py -p /dev/cu.usbmodemXXXX flash monitor
 ```
 
 只烧录已经生成的应用镜像时，可以使用：
 
-```bash
+```sh
 idf.py -p /dev/cu.usbmodemXXXX app-flash
 ```
 
@@ -86,7 +91,7 @@ idf.py -p /dev/cu.usbmodemXXXX app-flash
 
 查看小智串口日志：
 
-```bash
+```sh
 idf.py -p /dev/cu.usbmodemXXXX monitor
 ```
 
@@ -94,7 +99,7 @@ idf.py -p /dev/cu.usbmodemXXXX monitor
 
 #### 测试命令与验证方式
 
-```bash
+```sh
 # PlatformIO 编译检查
 pio run
 
@@ -141,7 +146,7 @@ GPIO21 ───── 右侧 TCRT5000 DO
 
 烧录 Arduino 固件后，打开串口监视器：
 
-```bash
+```sh
 export PATH="$HOME/Library/Python/3.14/bin:$PATH"
 cd /Users/hemingming/worker/Robot-M
 pio device monitor --port /dev/cu.usbmodem5B900929761 --baud 115200
@@ -267,7 +272,7 @@ servo stop
 
 PlatformIO 固件使用本地头文件保存 Wi-Fi 凭据：
 
-```bash
+```sh
 cp src/wifi_secrets.h.example src/wifi_secrets.h
 ```
 
@@ -345,7 +350,7 @@ URT-2 电平选择拨到 `3V3`。舵机接 URT-2 白色 `G/V1/S` 的 SCS 接口�
 
 先编译并烧录 Arduino 固件：
 
-```bash
+```sh
 export PATH="$HOME/Library/Python/3.14/bin:$PATH"
 cd /Users/hemingming/worker/Robot-M
 pio run
@@ -354,7 +359,7 @@ pio run --target upload
 
 打开串口监视器：
 
-```bash
+```sh
 pio device monitor --port /dev/cu.usbmodem5B900929761 --baud 115200
 ```
 
@@ -409,7 +414,7 @@ ID 11..12 屏幕的 2 个舵机
 
 如果 USB 重插后串口名称变化，先执行：
 
-```bash
+```sh
 pio device list
 ```
 
@@ -580,3 +585,4 @@ python3 scripts/build.py robot-m --name robot-m
 ```
 
 小智固件的完整编译和烧录命令见本文档前面的“快速开始”章节；不要把真实 Wi-Fi 密码或串口路径提交到仓库。
+

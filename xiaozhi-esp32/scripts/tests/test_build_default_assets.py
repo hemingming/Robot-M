@@ -15,6 +15,29 @@ SPEC.loader.exec_module(BUILD)
 
 
 class BuildDefaultAssetsTest(unittest.TestCase):
+    def test_offline_commands_are_opt_in(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config"
+            for content in ("", "# CONFIG_OFFLINE_VOICE is not set\n", "CONFIG_OFFLINE_VOICE=n\n"):
+                config.write_text(content, encoding="utf-8")
+                self.assertEqual(BUILD.read_offline_commands_from_sdkconfig(config), [])
+
+    def test_robot_m_offline_commands_survive_asset_index(self):
+        board = json.loads((ROOT / "main/boards/robot-m/config.json").read_text())
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "config"
+            config.write_text("\n".join(board["builds"][0]["sdkconfig_append"]), encoding="utf-8")
+            wake = BUILD.read_custom_wake_word_from_sdkconfig(config)
+            commands = BUILD.read_offline_commands_from_sdkconfig(config)
+            self.assertEqual([command["action"] for command in commands],
+                             ["volume_up", "volume_down", "stop"])
+            self.assertEqual(wake["wake_word"], "ni hao da tou")
+            commands.insert(0, {"command": wake["wake_word"], "text": wake["display"], "action": "wake"})
+            info = {"language": "cn", "duration": 3000, "threshold": wake["threshold"], "commands": commands}
+            BUILD.generate_index_json(directory, "srmodels.bin", None, None, multinet_model_info=info)
+            index = json.loads((Path(directory) / "index.json").read_text())
+            self.assertEqual(index["multinet_model"], info)
+
     def test_text_font_metadata_uses_bundle_charset_size_and_bpp(self):
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory)

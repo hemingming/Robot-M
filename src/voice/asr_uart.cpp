@@ -38,7 +38,9 @@ void AsrUart::handleLine(const String& line) {
   command.toUpperCase();
 
   AsrAction action;
-  if (command == "FORWARD" || command == "直走") {
+  if (command == "WAKE" || command == "唤醒" || command == "你好大头") {
+    action = AsrAction::Wake;
+  } else if (command == "FORWARD" || command == "直走") {
     action = AsrAction::Forward;
   } else if (command == "LEFT" || command == "TURN_LEFT" || command == "左转") {
     action = AsrAction::TurnLeft;

@@ -4,6 +4,9 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
+#include "mcp_server.h"
+#include "limb_controller.h"
+#include "scs_servo_bus.h"
 
 #include <esp_log.h>
 #include <esp_lcd_panel_io.h>
@@ -19,6 +22,8 @@ class RobotMBoard : public WifiBoard {
 private:
     Button boot_button_;
     LcdDisplay* display_ = nullptr;
+    robot_m::ScsServoBus servo_bus_;
+    robot_m::LimbController limb_controller_{servo_bus_};
 
     void InitializeSpi() {
         // 初始化屏幕专用 SPI 总线；最大传输长度按整屏 RGB565 数据预留。
@@ -80,12 +85,59 @@ private:
         });
     }
 
+    void InitializeServoBus() {
+        servo_bus_.Init(SERVO_UART_PORT, SERVO_UART_TX_PIN, SERVO_UART_RX_PIN, SERVO_UART_BAUD_RATE);
+    }
+
+    void RegisterMotionMcpTools() {
+        // 语音指令入口：直接映射到 PlatformIO 固件的前进/转向/站立/急停语义，
+        // 保持两套固件的动作命名和舵机 ID 分配一致。
+        auto& mcp_server = McpServer::GetInstance();
+
+        mcp_server.AddTool("self.robot.walk_forward", "让机器人持续向前走，直到调用 self.robot.stop",
+                           PropertyList(),
+                           [this](const PropertyList&) -> ReturnValue {
+                               limb_controller_.StartForward();
+                               return true;
+                           });
+
+        mcp_server.AddTool("self.robot.turn_left", "让机器人持续原地左转，直到调用 self.robot.stop",
+                           PropertyList(),
+                           [this](const PropertyList&) -> ReturnValue {
+                               limb_controller_.StartTurnLeft();
+                               return true;
+                           });
+
+        mcp_server.AddTool("self.robot.turn_right", "让机器人持续原地右转，直到调用 self.robot.stop",
+                           PropertyList(),
+                           [this](const PropertyList&) -> ReturnValue {
+                               limb_controller_.StartTurnRight();
+                               return true;
+                           });
+
+        mcp_server.AddTool("self.robot.stand", "让机器人回到站立中位姿态并停止当前动作",
+                           PropertyList(),
+                           [this](const PropertyList&) -> ReturnValue {
+                               limb_controller_.Stand();
+                               return true;
+                           });
+
+        mcp_server.AddTool("self.robot.stop", "立即停止机器人动作并关闭舵机扭力",
+                           PropertyList(),
+                           [this](const PropertyList&) -> ReturnValue {
+                               limb_controller_.Stop();
+                               return true;
+                           });
+    }
+
 public:
     RobotMBoard() : boot_button_(BOOT_BUTTON_GPIO) {
         // 构造板卡对象时完成底层外设初始化，随后由框架取得音频和显示对象。
         InitializeSpi();
         InitializeDisplay();
         InitializeButtons();
+        InitializeServoBus();
+        RegisterMotionMcpTools();
     }
 
     AudioCodec* GetAudioCodec() override {
@@ -98,9 +150,9 @@ public:
         return &audio_codec;
     }
 
-    Display* GetDisplay() override {
-        return display_;
-    }
+    void StopMotion() override { limb_controller_.Stop(); }
+
+    Display* GetDisplay() override { return display_; }
 
     Backlight* GetBacklight() override {
         return nullptr;

@@ -8,6 +8,8 @@ namespace {
 
 constexpr float kMinimumBatteryVoltage = 6.6f;
 constexpr float kRecoveryTiltDegrees = 18.0f;
+// 唤醒后若一直没有收到新指令，超过这个时长就自动回到待机，避免持续保持 Listening。
+constexpr uint32_t kListeningTimeoutMs = 8000;
 
 // 步行状态下只要横滚或俯仰超过阈值，就认为姿态不安全并进入 Recovery。
 bool isTilted(const SensorSnapshot& sensors) {
@@ -53,6 +55,12 @@ void RobotRuntime::update(uint32_t nowMs, const SensorSnapshot& sensors) {
     return;
   }
 
+  // Listening 状态下长时间没有新指令刷新超时时间，就自动回到待机。
+  if (mode_ == RobotMode::Listening &&
+      static_cast<int32_t>(nowMs - wakeDeadlineMs_) >= 0) {
+    requestedMode_ = RobotMode::Standby;
+  }
+
   setMode(requestedMode_);
 }
 
@@ -61,6 +69,15 @@ void RobotRuntime::requestMode(RobotMode requestedMode) {
   if (requestedMode != RobotMode::EmergencyStop) {
     requestedMode_ = requestedMode;
   }
+}
+
+void RobotRuntime::noteWakeWord(uint32_t nowMs) {
+  wakeDeadlineMs_ = nowMs + kListeningTimeoutMs;
+  requestMode(RobotMode::Listening);
+}
+
+bool RobotRuntime::isAwake() const {
+  return mode_ == RobotMode::Listening || mode_ == RobotMode::Walking;
 }
 
 RobotMode RobotRuntime::mode() const { return mode_; }

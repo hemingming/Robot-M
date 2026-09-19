@@ -117,15 +117,27 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     }
 
     multinet_ = esp_mn_handle_from_name(mn_name_);
+    if (multinet_ == nullptr) {
+        return false;
+    }
     multinet_model_data_ = multinet_->create(mn_name_, duration_);
+    if (multinet_model_data_ == nullptr) {
+        return false;
+    }
     multinet_->set_det_threshold(multinet_model_data_, threshold_);
     input_buffer_.reserve(multinet_->get_samp_chunksize(multinet_model_data_));
     esp_mn_commands_clear();
-    for (int i = 0; i < commands_.size(); i++) {
-        esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+    for (size_t index = 0; index < commands_.size(); ++index) {
+        if (esp_mn_commands_add(index + 1, commands_[index].command.c_str()) != ESP_OK) {
+            ESP_LOGE(TAG, "Invalid speech command: %s", commands_[index].command.c_str());
+            return false;
+        }
     }
-    esp_mn_commands_update();
-    
+    if (esp_mn_commands_update() != nullptr) {
+        ESP_LOGE(TAG, "Failed to register speech commands");
+        return false;
+    }
+
     multinet_->print_active_speech_commands(multinet_model_data_);
 #if CONFIG_SEND_WAKE_WORD_DATA
     if (!wake_word_audio_cache_.Initialize(16000 * 2)) {
@@ -189,18 +201,20 @@ void CustomWakeWord::FeedSamples(const int16_t* data, size_t samples, bool mono)
 #endif
 
         esp_mn_state_t mn_state = multinet_->detect(multinet_model_data_, input_buffer_.data());
-        
+
         if (mn_state == ESP_MN_STATE_DETECTED) {
-            esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
-            for (int i = 0; i < mn_result->num && running_; i++) {
-                ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f", 
-                        mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
-                auto& command = commands_[mn_result->command_id[i] - 1];
+            esp_mn_results_t* mn_result = multinet_->get_results(multinet_model_data_);
+            if (mn_result != nullptr && mn_result->num > 0 && running_ &&
+                mn_result->command_id[0] > 0 &&
+                static_cast<size_t>(mn_result->command_id[0]) <= commands_.size()) {
+                ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f",
+                         mn_result->command_id[0], mn_result->string, mn_result->prob[0]);
+                auto& command = commands_[mn_result->command_id[0] - 1];
                 if (command.action == "wake") {
                     last_detected_wake_word_ = command.text;
                     running_ = false;
                     input_buffer_.clear();
-                    
+
                     if (wake_word_detected_callback_) {
                         wake_word_detected_callback_(last_detected_wake_word_);
                     }
@@ -214,7 +228,7 @@ void CustomWakeWord::FeedSamples(const int16_t* data, size_t samples, bool mono)
             ESP_LOGD(TAG, "Command word detection timeout, cleaning state");
             multinet_->clean(multinet_model_data_);
         }
-        
+
         if (!running_) {
             break;
         }

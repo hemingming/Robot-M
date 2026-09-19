@@ -913,6 +913,11 @@ choice WAKE_WORD_TYPE
 
 endchoice
 
+config OFFLINE_VOICE
+    bool "Local voice commands without a network connection"
+    depends on USE_CUSTOM_WAKE_WORD
+    default n
+
 config CUSTOM_WAKE_WORD
     string "Custom Wake Word"
     default "xiao tu dou"

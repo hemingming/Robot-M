@@ -613,8 +613,19 @@ void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* to
 
     // Use main thread to call the tool
     auto& app = Application::GetInstance();
-    app.Schedule([this, id, tool, arguments = std::move(arguments),
+    const auto motion_epoch = app.GetMotionEpoch();
+    const bool motion_allowed = app.IsNetworkConnected();
+    app.Schedule([this, id, tool, motion_epoch, motion_allowed, arguments = std::move(arguments),
                   response_sender = std::move(response_sender)]() {
+#if CONFIG_OFFLINE_VOICE
+        auto& application = Application::GetInstance();
+        if (tool->name().starts_with("self.robot.") && tool->name() != "self.robot.stop" &&
+            (!motion_allowed || !application.IsNetworkConnected() ||
+             motion_epoch != application.GetMotionEpoch())) {
+            ReplyError(id, -32600, "Discarded stale or offline motion command", response_sender);
+            return;
+        }
+#endif
         auto result = tool->Call(arguments);
         if (!result) {
             ESP_LOGE(TAG, "tools/call: %s", result.error().c_str());

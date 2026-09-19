@@ -18,6 +18,7 @@
 #include <cJSON.h>
 #include <cstring>
 #include <limits>
+#include <algorithm>
 
 #define TAG "Application"
 
@@ -84,6 +85,15 @@ void Application::Initialize() {
     };
     callbacks.on_command_detected = [this](const std::string& action) {
         ESP_LOGI(TAG, "Robot action command: %s", action.c_str());
+#if CONFIG_OFFLINE_VOICE
+        if (action == "volume_up") {
+            xEventGroupSetBits(event_group_, MAIN_EVENT_LOCAL_VOLUME_UP);
+        } else if (action == "volume_down") {
+            xEventGroupSetBits(event_group_, MAIN_EVENT_LOCAL_VOLUME_DOWN);
+        } else if (action == "stop") {
+            xEventGroupSetBits(event_group_, MAIN_EVENT_LOCAL_STOP);
+        }
+#endif
     };
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
@@ -95,6 +105,14 @@ void Application::Initialize() {
         notify_player_.OnPlaybackProgress(playback_id, media_position_ms);
     };
     audio_service_.SetCallbacks(callbacks);
+
+#if CONFIG_OFFLINE_VOICE
+    Settings asset_settings("assets", false);
+    if (asset_settings.GetString("download_url").empty()) {
+        local_assets_loaded_ = Assets::GetInstance().Apply();
+        audio_service_.EnableWakeWordDetection(local_assets_loaded_);
+    }
+#endif
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
@@ -132,6 +150,7 @@ void Application::Initialize() {
                 break;
             }
             case NetworkEvent::Connected: {
+                network_connected_ = true;
                 std::string msg = Lang::Strings::CONNECTED_TO;
                 msg += data;
                 display->ShowNotification(msg.c_str(), 30000);
@@ -139,9 +158,13 @@ void Application::Initialize() {
                 break;
             }
             case NetworkEvent::Disconnected:
+                network_connected_ = false;
+                ++motion_epoch_;
                 xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_DISCONNECTED);
                 break;
             case NetworkEvent::WifiConfigModeEnter:
+                network_connected_ = false;
+                ++motion_epoch_;
                 // WiFi config mode enter is handled by WifiBoard internally
                 break;
             case NetworkEvent::WifiConfigModeExit:
@@ -185,12 +208,16 @@ void Application::Run() {
         MAIN_EVENT_VAD_CHANGE | MAIN_EVENT_CLOCK_TICK | MAIN_EVENT_ERROR |
         MAIN_EVENT_NETWORK_CONNECTED | MAIN_EVENT_NETWORK_DISCONNECTED | MAIN_EVENT_TOGGLE_CHAT |
         MAIN_EVENT_START_LISTENING | MAIN_EVENT_STOP_LISTENING | MAIN_EVENT_ACTIVATION_DONE |
-        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_PLAYBACK_DRAINED;
+        MAIN_EVENT_STATE_CHANGED | MAIN_EVENT_PLAYBACK_DRAINED | MAIN_EVENT_LOCAL_VOLUME_UP |
+        MAIN_EVENT_LOCAL_VOLUME_DOWN | MAIN_EVENT_LOCAL_STOP;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
+#if CONFIG_OFFLINE_VOICE
+            Board::GetInstance().StopMotion();
+#endif
             if (GetDeviceState() == kDeviceStateNotifying) {
                 StopNotification();
             }
@@ -218,6 +245,7 @@ void Application::Run() {
         if (bits & MAIN_EVENT_PLAYBACK_DRAINED) {
             if (audio_service_.IsPlaybackIdle()) {
                 notify_player_.OnPlaybackDrained();
+                FinishOfflinePrompt();
             }
             // Deferred listening start (auto mode): the playback queue has
             // drained, so it is now safe to enable voice processing.
@@ -226,6 +254,14 @@ void Application::Run() {
                 pending_listening_start_ = false;
                 StartListeningAudio();
             }
+        }
+
+        if (bits & MAIN_EVENT_LOCAL_STOP) {
+            HandleLocalCommand("stop");
+        } else if (bits & MAIN_EVENT_LOCAL_VOLUME_UP) {
+            HandleLocalCommand("volume_up");
+        } else if (bits & MAIN_EVENT_LOCAL_VOLUME_DOWN) {
+            HandleLocalCommand("volume_down");
         }
 
         if (bits & MAIN_EVENT_TOGGLE_CHAT) {
@@ -291,6 +327,9 @@ void Application::Run() {
 
 void Application::HandleNetworkConnectedEvent() {
     ESP_LOGI(TAG, "Network connected");
+    if (!network_connected_) {
+        return;
+    }
     auto state = GetDeviceState();
 
     if (state == kDeviceStateStarting || state == kDeviceStateWifiConfiguring) {
@@ -317,6 +356,15 @@ void Application::HandleNetworkConnectedEvent() {
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
+    if (network_connected_) {
+        return;
+    }
+#if CONFIG_OFFLINE_VOICE
+    Board::GetInstance().StopMotion();
+    audio_service_.EnableVoiceProcessing(false);
+    while (audio_service_.PopPacketFromSendQueue()) {
+    }
+#endif
     // Close current conversation when network disconnected
     auto state = GetDeviceState();
     if (state == kDeviceStateNotifying) {
@@ -325,7 +373,13 @@ void Application::HandleNetworkDisconnectedEvent() {
     if (state == kDeviceStateConnecting || state == kDeviceStateListening ||
         state == kDeviceStateSpeaking) {
         ESP_LOGI(TAG, "Closing audio channel due to network disconnection");
-        protocol_->CloseAudioChannel();
+        if (protocol_) {
+            protocol_->CloseAudioChannel();
+        }
+#if CONFIG_OFFLINE_VOICE
+        audio_service_.ResetDecoder();
+        SetDeviceState(kDeviceStateIdle);
+#endif
     }
 
     // Update the status bar immediately to show the network state
@@ -388,6 +442,9 @@ void Application::CheckAssetsVersion() {
         return;
     }
     assets_version_checked_ = true;
+    if (local_assets_loaded_) {
+        return;
+    }
 
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
@@ -437,7 +494,7 @@ void Application::CheckAssetsVersion() {
     }
 
     // Apply assets
-    assets.Apply();
+    local_assets_loaded_ = assets.Apply();
     display->SetChatMessage("system", "");
     display->SetEmotion("robot_2");
 }
@@ -550,6 +607,7 @@ void Application::InitializeProtocol() {
     protocol_->OnConnected([this]() { DismissAlert(); });
 
     protocol_->OnNetworkError([this](const std::string& message) {
+        ++motion_epoch_;
         last_error_message_ = message;
         xEventGroupSetBits(event_group_, MAIN_EVENT_ERROR);
     });
@@ -571,8 +629,12 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->OnAudioChannelClosed([this, &board]() {
+        ++motion_epoch_;
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
+#if CONFIG_OFFLINE_VOICE
+            Board::GetInstance().StopMotion();
+#endif
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
@@ -898,6 +960,21 @@ void Application::HandleStopListeningEvent() {
 }
 
 void Application::HandleWakeWordDetectedEvent() {
+#if CONFIG_OFFLINE_VOICE
+    if (offline_prompt_playing_) {
+        return;
+    }
+    auto current_state = GetDeviceState();
+    if (current_state == kDeviceStateUpgrading || current_state == kDeviceStateFatalError ||
+        current_state == kDeviceStateAudioTesting) {
+        return;
+    }
+    if (!network_connected_ || !protocol_ || current_state == kDeviceStateStarting ||
+        current_state == kDeviceStateWifiConfiguring || current_state == kDeviceStateActivating) {
+        PlayOfflinePrompt();
+        return;
+    }
+#endif
     if (!protocol_) {
         return;
     }
@@ -974,6 +1051,9 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
             // state (not every failure path reports a network error), and
             // wake word detection is re-enabled by the idle state handler.
             SetDeviceState(kDeviceStateIdle);
+#if CONFIG_OFFLINE_VOICE
+            PlayOfflinePrompt();
+#endif
             return;
         }
     }
@@ -992,6 +1072,77 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     // (PlaySound here would be cleared by ResetDecoder in EnableVoiceProcessing)
     play_popup_on_listening_ = true;
     SetListeningMode(GetDefaultListeningMode());
+#endif
+}
+
+void Application::PlayOfflinePrompt() {
+#if CONFIG_OFFLINE_VOICE
+    if (offline_prompt_playing_) {
+        return;
+    }
+    offline_prompt_playing_ = true;
+    offline_prompt_queued_ = false;
+    audio_service_.EnableWakeWordDetection(false);
+    auto display = Board::GetInstance().GetDisplay();
+    display->SetChatMessage("system", "我在，现在没有网络。");
+    ESP_LOGI(TAG, "Offline wake: local response");
+    auto result = xTaskCreate(
+        [](void* context) {
+            auto app = static_cast<Application*>(context);
+            extern const char offline_start[] asm("_binary_offline_ogg_start");
+            extern const char offline_end[] asm("_binary_offline_ogg_end");
+            app->audio_service_.PlaySound(
+                std::string_view(offline_start, offline_end - offline_start));
+            app->Schedule([app]() {
+                app->offline_prompt_queued_ = true;
+                app->FinishOfflinePrompt();
+            });
+            vTaskDelete(nullptr);
+        },
+        "offline_prompt", 4096, this, 2, nullptr);
+    if (result != pdPASS) {
+        offline_prompt_queued_ = true;
+        FinishOfflinePrompt();
+    }
+#endif
+}
+
+void Application::FinishOfflinePrompt() {
+    if (!offline_prompt_playing_ || !offline_prompt_queued_ || !audio_service_.IsPlaybackIdle()) {
+        return;
+    }
+    offline_prompt_playing_ = false;
+    offline_prompt_queued_ = false;
+    auto state = GetDeviceState();
+    if (state == kDeviceStateIdle || state == kDeviceStateStarting ||
+        state == kDeviceStateActivating || state == kDeviceStateWifiConfiguring) {
+        audio_service_.EnableWakeWordDetection(true);
+    }
+}
+
+void Application::HandleLocalCommand(const char* action) {
+#if CONFIG_OFFLINE_VOICE
+    auto& board = Board::GetInstance();
+    if (strcmp(action, "stop") == 0) {
+        ++motion_epoch_;
+        board.StopMotion();
+        ESP_LOGI(TAG, "Local motion stop");
+        return;
+    }
+    auto now = esp_timer_get_time();
+    if (offline_prompt_playing_ || now - local_command_time_ < 1000000) {
+        return;
+    }
+    local_command_time_ = now;
+    auto codec = board.GetAudioCodec();
+    if (codec == nullptr) {
+        return;
+    }
+    int delta = strcmp(action, "volume_up") == 0 ? 10 : -10;
+    int volume = std::clamp(codec->output_volume() + delta, 0, 100);
+    codec->SetOutputVolume(volume);
+    board.GetDisplay()->ShowNotification((std::string("音量 ") + std::to_string(volume)).c_str());
+    ESP_LOGI(TAG, "Local volume: %d", volume);
 #endif
 }
 
@@ -1020,7 +1171,7 @@ void Application::HandleStateChangedEvent() {
                     "neutral");  // Then set emotion (wechat mode checks child count)
             }
             audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(true);
+            audio_service_.EnableWakeWordDetection(!offline_prompt_playing_);
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -1063,7 +1214,11 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
+#if CONFIG_OFFLINE_VOICE
+            audio_service_.EnableWakeWordDetection(local_assets_loaded_ && !offline_prompt_playing_);
+#else
             audio_service_.EnableWakeWordDetection(false);
+#endif
             break;
         default:
             // Do nothing

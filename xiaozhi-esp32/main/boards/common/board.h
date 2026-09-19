@@ -73,6 +73,7 @@ public:
     virtual bool GetTemperature(float& esp32temp);
     virtual Display* GetDisplay();
     virtual Camera* GetCamera();
+    virtual void StopMotion() {}
     virtual NetworkInterface* GetNetwork() = 0;
     virtual void StartNetwork() = 0;
     virtual void SetNetworkEventCallback(NetworkEventCallback callback) { (void)callback; }
@@ -85,8 +86,6 @@ public:
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \
-void* create_board() { \
-    return new BOARD_CLASS_NAME(); \
-}
+    void* create_board() { return new BOARD_CLASS_NAME(); }
 
-#endif // BOARD_H
+#endif  // BOARD_H

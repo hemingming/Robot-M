@@ -766,7 +766,7 @@ elseif(CONFIG_BOARD_TYPE_ROBOT_M)
     set(BOARD_DIR "robot-m")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_30_4)
     set(BUILTIN_ICON_FONT font_material_symbols_30_4)
-    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_64)
+    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_128)
 elseif(CONFIG_BOARD_TYPE_ZHENGCHEN_1_54TFT_ML307)
     set(BOARD_DIR "zhengchen/1.54tft-ml307")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_20_4)
@@ -1038,6 +1038,9 @@ if(NOT LANG_DIR STREQUAL "en-US")
 endif()
 
 file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
+if(NOT CONFIG_OFFLINE_VOICE)
+    list(REMOVE_ITEM COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/offline.ogg)
+endif()
 
 # If target chip is ESP32, exclude specific files to avoid build errors
 if(CONFIG_IDF_TARGET_ESP32)
