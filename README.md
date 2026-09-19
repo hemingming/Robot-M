@@ -1,588 +1,337 @@
+# Robot-M 开发与接线手册
 
-## AI Robot-M
-#### 硬件架构配置
+## 1. 先看这里
 
-```
+| 固件 | 工程目录 | 用途 | 串口命令 |
+| --- | --- | --- | --- |
+| 小智 ESP-IDF（当前使用） | [xiaozhi-esp32](xiaozhi-esp32/) | 大头语音、配网、屏幕、MCP、舵机查询 | 仅 `servo ping`、`servo scan` |
+| Arduino / PlatformIO | 仓库根目录 | 外设单项调试、传感器、RobotRuntime | 查询、改 ID、单舵机移动和机器人动作等 |
 
-    电源：7.4V 2200mAh锂电池 ✅ -
-    稳压板：ML2596电源稳压板 -
+两套固件不能同时运行。不要为了查询舵机误执行 Arduino 上传命令，覆盖正在使用的小智固件。本文所有 Bash 命令都需要在对应工程目录执行；`servo ...` 输入到串口监视器，不是在 Bash 中执行。
 
-    主板：ESP32-S3-DEV-KIT-N32R16V-M -
-    主板集线器：IIC HUB模块 分线器 I2C集线器 ✅ -
+### 2026-09-20 已验证进度
 
-    舵机转换板：URT-2 ✅
-    总线舵机集线器： 舵机集线器 TTL分线板 ✅ -
-    12个飞特舵机：SC-0017-C001
-    步态平衡：601N16轴BMI323 ✅ -
-    障碍识别：TCRT5000红外反射传感器    ToF测距模块VL53L1X ✅ -
+- 小智本地 UART0 查询入口已验证，日志速率为 115200；舵机 UART1 为 1000000 8N1。
+- GPIO19/20 接线纠正后，本地 `servo scan 1 2` 收到两个 ID 的有效 Ping 应答。
+- SCSCL 位置、时间和速度使用高字节在前。已修复小智驱动的位置/速度字节序错误（旧编码会把位置 512 发成 2）。
+- 修复通过 Robot-M 构建及 5 个编码检查，并已通过原生 USB 烧录，5 个写入区域全部通过哈希校验。
+- **尚未验证**：修复后的实际动作、各关节零位/限位、稳压后的实际舵机供电电压。Ping 成功不代表动作或供电已经合格。
 
-    屏幕：4.0寸SPI串口 TFT液晶屏电容触摸屏 驱动IC ST7796S ✅ -
-    摄影头：ESP32串口转 带OV2640摄像头
-    麦克风：INMP441 ✅ -
-    音频：MAX98357 I2S 音频放大器 ✅ -
-    
+### 安全与 USB 选择
 
-```
+- 改线前断电；上电或停止扭力前支撑好机械结构。不要直接测试未经校准的步态。
+- **GPIO19/20 与 ESP32-S3 原生 USB 共用**。接着 URT-2 信号线时，不要同时连接原生 USB 数据口。
+- 日常日志和查询使用**板载 USB 转串口（UART0）**。原生 USB 烧录前，先断开舵机动力及 URT-2 到 GPIO19/20 的信号线。
+- 舵机动力不得从 ESP32 的 5V/3.3V 引脚取电。电池标称 7.4V 不等于稳压板输出电压；2 串锂电池满电通常约 8.4V，不能据此直接给外设供电。
+- URT-2 的 `>5V` 引脚方向、允许电压及逻辑/动力供电关系需按实际版本手册确认，不能仅凭丝印当作普通 5V 输入。
 
-### Robot-M 开发与接线手册
+## 2. 小智：编译、烧录、串口
 
-本文档同时说明两套固件：
+### 2.1 加载环境与查看端口
 
-- **PlatformIO/Arduino 固件**：位于仓库根目录，主要用于硬件、屏幕、I2S 音频、I2C 传感器和 RobotRuntime 的单项调试。
-- **小智 ESP-IDF 固件**：位于 `xiaozhi-esp32/`，用于语音交互、屏幕 UI、配网和联网运行。
+从仓库根目录打开终端。推荐 ESP-IDF 6.1，最低 6.0.1，不使用 IDF 5.x。SDK 路径按本机安装位置调整；统一使用 `python3`。
 
-两套固件使用同一块 ESP32-S3 和相同的主要引脚，但不能同时运行；烧录哪套固件，取决于当前要测试硬件还是使用小智功能。
-
-#### 快速开始
-
-##### 1. PlatformIO/Arduino 固件
-
-在仓库根目录执行。需要先安装 PlatformIO，并确认 `pio` 已加入终端 `PATH`。
-
-```sh
-cd /Users/hemingming/worker/Robot-M
-
-# 编译当前 Arduino 固件
-pio run
-
-# 连接 ESP32 后烧录；也可以追加 --upload-port 指定串口
-pio run --target upload
-# pio run --target upload --upload-port /dev/cu.usbmodem5B900929761
-
-# 打开 115200 波特率串口监视器
-pio device monitor --baud 115200
-```
-
-PlatformIO 固件没有独立的“启动命令”。烧录后 ESP32 复位，Arduino 会自动执行 `setup()`，随后循环执行 `loop()`。启动日志会输出供电、I2C、显示、音频和 RobotRuntime 状态。
-
-##### 2. 小智 ESP-IDF 固件
-
-小智工程要求 ESP-IDF 6.0.1 或更高版本，当前推荐 ESP-IDF 6.1。每次打开新终端都要先加载 ESP-IDF 环境：
-
-```sh
-cd /Users/hemingming/worker/Robot-M/xiaozhi-esp32
-source /Users/hemingming/esp/esp-idf/export.sh
-```
-
-编译 Robot-M 小智固件：
-
-```sh
-python3 scripts/build.py robot-m --name robot-m
-```
-
-看到 `Project build complete` 表示编译成功。指定串口烧录完整固件：
-
-```sh
-idf.py -p /dev/cu.usbmodemXXXX flash
-```
-
-烧录后直接查看日志，可以合并成一条命令：
-```sh
-idf.py -p /dev/cu.usbmodemXXXX flash monitor
-```
-
-只烧录已经生成的应用镜像时，可以使用：
-
-```sh
-idf.py -p /dev/cu.usbmodemXXXX app-flash
-```
-
-注意：`app-flash` 在构建目录缓存不一致时仍可能触发增量编译。修改了代码或配置后，先重新执行 `python3 scripts/build.py robot-m --name robot-m`，再烧录。
-
-查看小智串口日志：
-
-```sh
-idf.py -p /dev/cu.usbmodemXXXX monitor
-```
-
-退出串口监视器通常使用 `Ctrl+]`。如果自动下载失败，按住 **BOOT**，短按一次 **EN/RESET**，松开 BOOT 后重新执行烧录命令。
-
-#### 测试命令与验证方式
-
-```sh
-# PlatformIO 编译检查
-pio run
-
-# PlatformIO 单元测试入口；当前仓库暂时没有 test/ 测试目录
-pio test
-
-# ESP-IDF 编译检查
+```bash
 cd xiaozhi-esp32
-source /Users/hemingming/esp/esp-idf/export.sh
+source "$HOME/esp/esp-idf/export.sh"
+idf.py --version
+python3 -m serial.tools.list_ports -v
+```
+
+2026-09-20 的设备识别信息如下；端口路径会变化，以本次枚举为准，不按数字猜设备。
+
+| 接口 | USB VID:PID | 用途 |
+| --- | --- | --- |
+| 板载 USB 转串口 | `1A86:55D3` | UART0 日志及本地查询；当天下载握手未成功 |
+| ESP32-S3 原生 USB | `303A:1001` | 当天手动下载烧录成功；与 GPIO19/20 冲突 |
+
+在当前终端设置实际端口，下面是占位符，必须替换：
+
+```bash
+export FLASH_PORT=/dev/cu.usbmodemXXXX
+export LOG_PORT=/dev/cu.usbmodemYYYY
+```
+
+### 2.2 编译 Robot-M
+
+工作目录：`xiaozhi-esp32/`。
+
+```bash
 python3 scripts/build.py robot-m --name robot-m
 ```
 
-当前项目的硬件验证以串口日志和实际外设表现为主：
+确认输出 `Project build complete`。修改代码或板级配置后重新编译；不要手工改生成的 `sdkconfig`、`build/` 文件。当前使用默认生成资源，不需要另外放入自定义 `assets.bin`。
 
-- 显示屏：启动后出现三段红、绿、蓝测试区域，并显示麦克风电平条。
-- I2C：PlatformIO 固件启动时输出 ToF `0x29` 和 BMI323 `0x68` 是否响应。
-- 麦克风：对着 INMP441 说话，串口的 `Microphone level` 应明显变化。
-- 小智：烧录后屏幕显示 UI，按提示配网，再说“你好，小智”测试唤醒和语音链路。
-- 舵机：当前代码只建立了 `actuators/` 和 `motion/` 接口，尚未自动发送动作指令。
+### 2.3 正常自动下载
 
-##### TCRT5000 红外传感器接线与测试
+工作目录：`xiaozhi-esp32/`。先关闭占用端口的串口监视器，并按前面的安全要求隔离舵机和原生 USB 引脚。
 
-当前 Arduino/PlatformIO 固件读取两个 TCRT5000 模块的数字输出 `DO`：
-
-| 模块引脚 | 左侧模块 | 右侧模块 | 说明 |
-| --- | --- | --- | --- |
-| `VCC` | 3.3V | 3.3V | 两个模块都使用 ESP32 的 3.3V |
-| `GND` | GND | GND | 必须与 ESP32 共地 |
-| `DO` | GPIO14 | GPIO21 | 数字比较器输出，固件周期性打印状态 |
-| `AO` | 暂不接 | 暂不接 | 当前固件不读取模拟输出 |
-
-接线示意：
-
-```text
-3.3V  ──┬── 左侧 TCRT5000 VCC
-    └── 右侧 TCRT5000 VCC
-
-GND   ──┬── 左侧 TCRT5000 GND
-    └── 右侧 TCRT5000 GND
-
-GPIO14 ───── 左侧 TCRT5000 DO
-GPIO21 ───── 右侧 TCRT5000 DO
+```bash
+idf.py -p "$FLASH_PORT" flash
 ```
 
-烧录 Arduino 固件后，打开串口监视器：
+正常自动下载无需按 BOOT。如果连接失败，先核对端口和接线，再使用下一节手动下载，不要反复擦除整片 Flash。
 
-```sh
-export PATH="$HOME/Library/Python/3.14/bin:$PATH"
-cd /Users/hemingming/worker/Robot-M
-pio device monitor --port /dev/cu.usbmodem5B900929761 --baud 115200
+### 2.4 今天成功使用的手动烧录方式
+
+1. 断开舵机动力与 GPIO19/20 的 URT-2 信号线，连接原生 USB。
+2. 按住 BOOT，短按 EN/RESET。再次枚举端口，确认出现原生 USB 设备。
+3. 在已完成编译的 `xiaozhi-esp32/` 目录运行下面命令。若保持 BOOT 按住，看到 `Connected to ESP32-S3` / `Stub flasher running` 后即可松开，不必按完整个烧录过程。
+
+```bash
+cd build
+python3 -m esptool --chip esp32s3 \
+  --port "$FLASH_PORT" --baud 460800 \
+  --before no-reset --after no-reset \
+  write-flash @flash_args
+cd ..
 ```
 
-串口会周期性显示：
+- `@flash_args` 使用本次构建的文件及地址，必须在 `build/` 内执行，不手工猜偏移。
+- 此命令写入 bootloader、分区表、OTA 初始选择数据、默认资源和应用；会擦除相应写入区域，**不是整片擦除**。不要把完整烧录当成必然保留所有状态的操作。
+- 当前分区方案未将 NVS 列为写入区域；更换分区方案前需另行评估数据保留。
+- 每个区域应显示 `Hash of data verified`。末尾 `Staying in bootloader` 是预期结果，因为指定了 `--after no-reset`。
+- 松开 BOOT 后短按 EN/RESET 启动。恢复舵机接线前再次断电、拔掉原生 USB，之后改用板载转串口查看日志。
 
-```text
-TCRT5000: left=1 right=1
+仅应用更新的可选命令（工作目录仍为 `xiaozhi-esp32/`）：
+
+```bash
+idf.py -p "$FLASH_PORT" app-flash
 ```
 
-测试步骤：
+`app-flash` 可能触发增量构建；只在分区/资源不变且确认应用槽位适用时使用，不能代替初次完整烧录。
 
-1. 用手或黑色物体靠近左侧传感器，观察 `left` 是否变化。
-2. 用手或黑色物体靠近右侧传感器，观察 `right` 是否变化。
-3. 分别调节两个模块上的电位器，使靠近和移开时 `DO` 能稳定切换。
-4. 部分模块是低电平触发，`1 -> 0` 可能表示检测到物体；以实际变化为准。
+### 2.5 日志与可输入命令的监视器
 
-如果状态不变化，依次检查 `VCC`、`GND`、对应 `DO` GPIO、模块指示灯和电位器。USB 重插后串口名称可能变化，可先执行 `pio device list` 查看当前端口。
+工作目录：`xiaozhi-esp32/`，使用板载转串口的 `$LOG_PORT`。
 
-#### ESP32-S3 GPIO 完整映射
+```bash
+idf.py -p "$LOG_PORT" monitor
+```
 
-以下表格以当前 `src/config/pin_def.h` 和 `xiaozhi-esp32/main/boards/robot-m/config.h` 为准。GPIO 数字是 ESP32-S3 管脚编号，不是排针位置编号。
+退出通常为 `Ctrl+]`。IDF monitor 的连接过程可能复位设备，机械结构须处于安全状态。需要本地回显和输入 `servo` 命令时，也可使用 pyserial：
 
-##### 电源、采样和总线
+```bash
+python3 -m serial.tools.miniterm "$LOG_PORT" 115200 \
+  --raw --echo --dtr 0 --rts 0
+```
 
-| 功能 | ESP32-S3 GPIO/电源 | 外设端 | 说明 |
-| --- | --- | --- | --- |
-| 电池电压采样 | GPIO4 | 电池分压输出 | 必须经过电阻分压，不能把 7.4V 电池直接接入 ADC |
-| 外设供电使能 | GPIO5 | 稳压板使能输入 | 固件启动时拉高 |
-| I2C SDA | GPIO38 | HUB SDA、触摸 SDA | 400 kHz，多个 I2C 设备共用 |
-| I2C SCL | GPIO39 | HUB SCL、触摸 SCL | 400 kHz，多个 I2C 设备共用 |
-| 逻辑电源 | 3.3V | ESP32、INMP441、传感器 | 不要用 5V 给 3.3V 设备供电 |
-| 功率电源 | 稳定 5V | TFT VCC、MAX98357A VIN | 按模块规格供电 |
-| 公共地 | GND | 所有模块 | ESP32、音频、屏幕、传感器必须共地 |
+miniterm 退出为 `Ctrl+]`，帮助为 `Ctrl+T` 后按 `Ctrl+H`。上述参数不主动执行下载复位序列，但打开串口仍可能因驱动/电路导致复位。先等待启动完成再输入命令。
 
-##### ST7796S 4.0 英寸 SPI 屏幕
-
-| 屏幕引脚 | ESP32-S3 | 固件宏/说明 |
-| --- | --- | --- |
-| `SDO/MISO` | GPIO13 | `DISPLAY_SPI_MISO_PIN` |
-| `SCK` | GPIO12 | `DISPLAY_SPI_SCLK_PIN` |
-| `SDI/MOSI` | GPIO11 | `DISPLAY_SPI_MOSI_PIN` |
-| `LCD_RS/DC` | GPIO9 | `DISPLAY_DC_PIN` |
-| `LCD_RST` | GPIO8 | `DISPLAY_RST_PIN` |
-| `LCD_CS` | GPIO10 | `DISPLAY_CS_PIN` |
-| `CTP_SCL` | GPIO39 | 与 I2C SCL 共用 |
-| `CTP_SDA` | GPIO38 | 与 I2C SDA 共用 |
-| `CTP_INT` | GPIO7 | 触摸中断，当前小智只预留 |
-| `CTP_RST` | GPIO6 | 触摸复位，当前小智只预留 |
-| `VCC` | 稳定 5V | 按屏幕模块规格供电 |
-| `GND` | GND | 与 ESP32 共地 |
-| `LED` | 按屏幕背光要求接电 | 不要让 ESP32 GPIO 直接承担约 103mA 背光电流 |
-| `SD_CS` | 暂不接 | 屏幕板载 SD 卡片选未使用 |
-
-当前小智屏幕配置为 `320x480` 竖屏，`DISPLAY_MIRROR_X=false`、`DISPLAY_MIRROR_Y=true`、`DISPLAY_SWAP_XY=false`。如果画面出现上下颠倒，优先检查这三个方向参数，不要先改接线。
-
-##### INMP441 麦克风
-
-| INMP441 引脚 | ESP32-S3 | 说明 |
-| --- | --- | --- |
-| `VDD` | 3.3V | 不能接 5V |
-| `GND` | GND | 必须共地 |
-| `SCK` | GPIO1 | 麦克风独立 BCLK，不能与功放共用 |
-| `WS` | GPIO2 | 麦克风独立 WS，不能与功放共用 |
-| `SD` | GPIO16 | 麦克风串行数据输出 |
-| `L/R` | GND | 选择左声道；固件使用 `ONLY_LEFT` |
-
-##### MAX98357A I2S 功放
-
-| MAX98357A 引脚 | ESP32-S3/电源 | 说明 |
-| --- | --- | --- |
-| `VIN` | 稳定 5V | 功放电源 |
-| `GND` | GND | 与 ESP32 共地 |
-| `BCLK` | GPIO17 | 功放独立 BCLK |
-| `LRC/WS` | GPIO18 | 功放独立 WS |
-| `DIN` | GPIO15 | 功放音频数据输入 |
-| `SD` | 3.3V | 拉高使功放保持开启 |
-| `GAIN` | 暂时悬空 | 按模块默认增益工作 |
-| `SPK+/-` | 喇叭正负端 | 喇叭两端只能接功放输出，不能接 ESP32 GND |
-
-##### I2C 传感器
-
-| 设备 | 总线 | 地址/引脚 | 当前状态 |
-| --- | --- | --- | --- |
-| BMI323 IMU | GPIO38/39 I2C | `0x68`；`CS -> 3.3V`，`SA0 -> GND` | PlatformIO 代码可探测，数据采集待接入 |
-| VL53L1X ToF | GPIO38/39 I2C | `0x29` | PlatformIO 代码可启动测距，受 `kSensorsEnabled` 控制 |
-| 电容触摸控制器 | GPIO38/39 I2C | `INT -> GPIO7`，`RST -> GPIO6` | 小智板卡当前只预留引脚 |
-| I2C HUB | GPIO38/39 | `SDA -> GPIO38`，`SCL -> GPIO39` | 需要 3.3V、GND 和合适的上拉 |
-
-##### TCRT5000 红外模块
-
-| 模块 | VCC | GND | 数字输出 `DO` | 模拟输出 `AO` |
-| --- | --- | --- | --- | --- |
-| 左侧 | 3.3V | GND | GPIO14 | 暂不接 |
-| 右侧 | 3.3V | GND | GPIO21 | 暂不接 |
-
-`DO` 高低电平逻辑可能因模块比较器和电位器方向不同而相反，需要实际测量确认。先调好灵敏度，再接入运动安全逻辑。
-
-##### 舵机、URT-2 和摄像头
-
-| 设备 | 当前连接状态 |
-| --- | --- |
-| 12 个 SC-0017-C001 总线舵机 | 电源板 `VADJ+` -> URT-2/舵机集线器电源+；电源板 GND -> 集线器 GND；ESP32 GND -> URT-2 信号地 |
-| URT-2 信号 TX/RX | 默认 `TX -> GPIO19`、`RX -> GPIO20`、1000000 8N1；接线前按 URT-2 丝印确认并可在 `src/config/pin_def.h` 修改 |
-| 舵机电源 | 不得从 ESP32 5V/3.3V 取电；先断开舵机负载，用万用表将 `VADJ` 调到舵机额定电压 |
-| OV2640 摄像头 | 硬件已列入规划，但当前 Robot-M 自定义板配置未定义摄像头 GPIO |
-
-驱动已完成 UART 初始化、SCS/SMS 舵机 Ping、单舵机目标位置发送和广播停扭力；启动时不会自动移动。首次测试只接 1 个舵机，先确认 ID 和零位，再逐步接入其余舵机。当前默认 `TX=GPIO19`、`RX=GPIO20`、1000000 8N1；如果 URT-2 丝印或手册不同，必须修改配置后再烧录。
-
-串口测试命令（每条命令后按回车）：
+预期启动日志：
 
 ```text
+Servo bus ready: TX=GPIO19, RX=GPIO20, baud=1000000
+Read-only servo console ready: UART0, 115200 baud
+```
+
+## 3. 小智：查询与动作
+
+### 3.1 本地只读查询（输入串口监视器）
+
+```text
+servo
 servo ping 1
+servo ping 2
+servo scan 1 2
 servo scan 1 20
-servo move 1 2048 500 10
-servo stop
 ```
 
-`servo scan 1 20` 会扫描 ID 1 到 20；也可以省略范围，默认扫描 1 到 20。扫描只发送 Ping，不会移动舵机。位置范围为 `0..4095`，速度和加速度必须先使用较小值测试。第一次只接一个舵机，并让舵机机械结构处于安全、无负载位置；确认 `ping` 成功后，再执行 `move`。
-
-#### Wi-Fi 配置
-
-PlatformIO 固件使用本地头文件保存 Wi-Fi 凭据：
-
-```sh
-cp src/wifi_secrets.h.example src/wifi_secrets.h
-```
-
-编辑 `src/wifi_secrets.h`：
-
-```cpp
-#pragma once
-
-namespace wifi_secrets {
-constexpr char kSsid[] = "你的WiFi名称";
-constexpr char kPassword[] = "你的WiFi密码";
-}  // namespace wifi_secrets
-```
-
-`src/wifi_secrets.h` 已加入 `.gitignore`，不要把真实密码提交到仓库。PlatformIO 固件最多等待 15 秒连接路由器，失败后仍会继续启动屏幕和麦克风。
-
-小智固件使用设备界面配网：烧录后按提示进入配网模式，用手机连接临时热点，再选择家庭 Wi-Fi 并输入密码。正常运行时按 BOOT 键可切换对话状态；启动阶段按 BOOT 键可进入配网流程。
-
-#### 常见问题
-
-| 现象 | 检查项 |
+| 命令/结果 | 含义 |
 | --- | --- |
-| `pio: command not found` | 安装 PlatformIO，并把 `pio` 加入当前终端 PATH |
-| `idf.py: command not found` | 在小智目录先执行 `source /Users/hemingming/esp/esp-idf/export.sh` |
-| 小智字体反着 | 检查 `DISPLAY_MIRROR_X/Y` 和 `DISPLAY_SWAP_XY`，当前正确值为 `false/true/false` |
-| 屏幕花屏 | 检查 SPI GPIO、CS/DC/RST、供电、共地，以及是否烧录了对应的 Robot-M 板卡配置 |
-| 麦克风无响应 | 检查 INMP441 的 3.3V、GND、GPIO1、GPIO2、GPIO16 和 `L/R -> GND` |
-| 功放无声音 | 检查 MAX98357A 的 5V、共地、GPIO15、`SD -> 3.3V` 和喇叭接线 |
-| I2C 设备未发现 | 检查 GPIO38/39、地址、上拉、电源和 GND；不要把 SDA/SCL 接反 |
-| 烧录连接失败 | 先确认串口路径；必要时按住 BOOT，短按 EN/RESET，再松开 BOOT 后重试 |
+| `servo` | 只返回用法提示，用于确认电脑到 ESP32 的命令入口 |
+| `servo ping <id>` | 查询一个 ID，不改变位置、扭力或 EEPROM |
+| `servo scan [first last]` | 不带参数默认扫描 1..20；指定范围时须同时提供两个 ID |
+| `valid Ping reply` | 收到指定 ID 的有效应答，不代表无故障或已校准 |
+| `no valid Ping reply` | 未接受到有效应答，不等于舵机损坏，也不能确定完全没有收到字节 |
+| `Servo query complete: N responding ID(s)` | 本次查询完成；N 是有应答的 ID 数 |
 
+小智入口只接受 ID 1..253，起点不得大于终点；超长输入、非法参数和其他命令会被拒绝。**不支持本地 `servo move`、`servo setid`、`servo stop`**。查询在独立任务执行，与 MCP 共用总线锁；启动不会自动扫描或启动步态。
 
+### 3.2 大头语音 / MCP
 
-### SCS0017 舵机与 URT-2 测试
+当前唤醒词：**你好大头**。首次配网按屏幕提示操作；启动阶段 BOOT 可进入配网，正常运行时用于切换对话状态。
 
-包装标注为 `SCS0017`，属于 **SCS 系列**，不是 SMS 系列：
+| MCP 工具 | 实际行为 |
+| --- | --- |
+| `self.robot.servo_ping` | 查询指定 `id`；首次启动异步任务，用相同 ID 再调用取得结果，未取完结果前不能换 ID |
+| `self.robot.walk_forward` | 持续运行当前前进位置循环，直到停止 |
+| `self.robot.turn_left` | 持续运行当前左转位置循环 |
+| `self.robot.turn_right` | 持续运行当前右转位置循环 |
+| `self.robot.stand` | 停止循环，将 ID 1..6 移到位置 512，并开启扭力 |
+| `self.robot.stop` | 停止循环，广播关闭扭力；结构可能失去支撑 |
 
-| 参数 | 范围/值 | 说明 |
+共 5 个动作控制接口，另有 1 个查询接口。前进/转向目前是简单的 467/557 位置循环，约每 350ms 切相，**不是经过机械校准或验证的稳定步态**。点头、摇头、挥手、跳舞尚未实现。MCP 返回执行成功不等于所有舵机都已到位。
+
+## 4. 接线与供电
+
+### 4.1 硬件清单
+
+| 类别 | 当前器件/规划 |
+| --- | --- |
+| 主控 | ESP32-S3-DEV-KIT-N32R16V-M，32MB Flash、16MB PSRAM |
+| 电源 | 标称 7.4V 2200mAh 锂电池；可调稳压板，型号/输出以实物为准 |
+| 舵机 | URT-2、TTL 总线分线板；12 个 SC-0017-C001 / 包装 SCS0017 |
+| 显示 | 4.0 英寸 SPI ST7796S 电容触摸屏 |
+| 音频 | INMP441、MAX98357A、喇叭 |
+| 传感器 | BMI323、VL53L1X、两个 TCRT5000、I2C HUB |
+| 摄像头 | 串口 OV2640 模组列入规划，当前小智板卡未集成 |
+
+### 4.2 URT-2 / SCS0017
+
+| ESP32 端 | URT-2 端 | 说明 |
 | --- | --- | --- |
-| 协议 | `SCSCL` | 飞特 SCS 系列串口总线协议 |
-| 默认波特率 | `1000000 8N1` | SCS 系列默认波特率 |
-| 额定电压 | `6.0V` / `7.4V` | 按实际电源板设置，不能接 ESP32 3.3V |
-| 位置 | `0..1023` | `512` 约为中位 |
-| 速度 | `0..1023` | 数值越大通常越快，先用小值测试 |
-| 加速度 | `0..255` | 当前 SCSCL `WritePosEx` 实现不使用该值，保留为接口参数 |
-| 默认 ID | 通常为 `1` | 多个舵机接入前必须逐个设置唯一 ID |
+| GPIO19，UART1 TX | RXD | ESP32 发送接 URT-2 接收 |
+| GPIO20，UART1 RX | TXD | ESP32 接收接 URT-2 发送 |
+| GND | GND | 与舵机电源共地 |
+| 不接 | DTR | 不用于当前控制链路 |
 
-当前 Arduino 驱动使用 `SCSCL` 协议类，位置命令示例：
+- 舵机连接 TTL/SCS 接口（本板标识 G/V1/S），不是 RS485 接口；按实物核对引脚、极性。ESP32 侧必须是兼容的 3.3V 逻辑电平，不能将高电压接入 GPIO。
+- SCSCL 协议，当前总线 1000000 8N1；位置范围 **0..1023**，512 只是数值中位，不是校准后的机械零位。SCSCL 16 位字段高字节在前。
+- TX/RX/GND 不是给 URT-2 供电的线路。逻辑供电来自哪个输入、是否与舵机电源相连，取决于 URT-2 实际板型。
+- 舵机动力由符合额定电压和电流要求的电源，经动力输入/集线器分配。先核对板型与供电路径，再用万用表测舵机 V+ 对 GND；不要根据电池标称或电位器位置推断。
+- 12 个舵机的启动/堵转电流、稳压板散热及导线载流能力必须评估，动力侧建议保险丝；不能默认 USB 或现有小稳压板可以带全部舵机。
+- 建议 ID 分配：1..6 腿部、7..10 手臂、11..12 头部。当前动作代码只使用 1..6，其他分配仍是规划。
 
-```text
-servo move 1 512 100 2  //id 位置  速度  加速度
-```
+### 4.3 ST7796S 屏幕（小智与 Arduino 主要 SPI 引脚一致）
 
-#### URT-2 接线
+| 屏幕端 | ESP32/电源 |
+| --- | --- |
+| SDO/MISO | GPIO13 |
+| SCK | GPIO12 |
+| SDI/MOSI | GPIO11 |
+| LCD_RS/DC | GPIO9 |
+| LCD_RST | GPIO8 |
+| LCD_CS | GPIO10 |
+| CTP_SCL / CTP_SDA | GPIO39 / GPIO38 |
+| CTP_INT / CTP_RST | GPIO7 / GPIO6（小智仅预留） |
+| VCC / GND | 按该屏模块规格使用稳定 5V / 公共地 |
+| LED | 按模块背光要求供电，不由 GPIO 承担背光电流 |
+| SD_CS | 暂不接 |
 
-URT-2 顶部五针从左到右为：
+当前小智显示为 320x480，`MIRROR_X=false`、`MIRROR_Y=true`、`SWAP_XY=false`。背光标注约 103mA；需确认模块是否已有驱动/限流。
 
-```text
-DTR | GND | >5V | RXD | TXD
-```
+### 4.4 音频（注意两套固件的麦克风时钟不同）
 
-ESP32-S3 连接：
+| 模块引脚 | 小智固件接线 | Arduino 当前配置 |
+| --- | --- | --- |
+| INMP441 VDD / GND / L/R | 3.3V / GND / GND | 相同 |
+| INMP441 SCK / WS | GPIO1 / GPIO2 | GPIO17 / GPIO18，与功放共用时钟 |
+| INMP441 SD | GPIO16 | 相同 |
+| MAX98357A VIN / GND | 按模块规格使用稳定 5V / GND | 相同 |
+| MAX98357A BCLK / LRC / DIN | GPIO17 / GPIO18 / GPIO15 | 相同 |
+| MAX98357A SD（启停） | 3.3V，按模块规格保持开启 | 按实物核对 |
+| MAX98357A GAIN | 按实际模块增益需求设置，不混用悬空/接地说明 | 按实物核对 |
 
-```text
-URT-2 DTR  -> 不接
-URT-2 GND  -> ESP32 GND
-URT-2 >5V  -> 稳定 5V 逻辑电源
-URT-2 RXD  -> ESP32 GPIO19 TX
-URT-2 TXD  -> ESP32 GPIO20 RX
-```
+喇叭只接功放 SPK+、SPK-，不能将任一喇叭输出接 ESP32 GND。更换固件前检查麦克风时钟接线，不能假定两套固件完全相同。
 
-URT-2 电平选择拨到 `3V3`。舵机接 URT-2 白色 `G/V1/S` 的 SCS 接口，不要接蓝色 `RS485-Bus` 接口。舵机动力电源使用 `VADJ`，不能从 ESP32 的 5V 或 3.3V 取电；ESP32、URT-2 和舵机电源必须共地。
+### 4.5 I2C、红外与预留接口
 
-#### 测试命令
+| 功能 | 引脚/配置 | 状态/注意事项 |
+| --- | --- | --- |
+| I2C HUB、BMI323、VL53L1X | SDA GPIO38，SCL GPIO39，400kHz | HUB/上拉使用兼容的 3.3V 电平 |
+| BMI323 | 地址 0x68；CS 接 3.3V、SA0 接 GND | Arduino 有 `imu read` 调试入口 |
+| VL53L1X | 默认地址 0x29 | Arduino 测距受配置开关控制 |
+| 左/右 TCRT5000 DO | GPIO14 / GPIO21 | VCC 3.3V、共地，AO 暂不接 |
+| 电池采样 | GPIO4 | Arduino；必须分压，电池不能直连 ADC |
+| 外设供电使能 | GPIO5 | Arduino；是否接稳压板使能需核对实物 |
+| 外接 ASR UART | TX GPIO41、RX GPIO40 | Arduino 预留/配置，不是小智麦克风语音通道 |
 
-先编译并烧录 Arduino 固件：
+TCRT5000 数字输出可能低有效，先用不同颜色/距离物体测试并调电位器；Arduino 日志示例为 `TCRT5000: left=1 right=1`。未校准前不能把它当作可靠的悬崖保护。小智不能默认继承 Arduino 的传感器及 RobotRuntime 安全逻辑。
 
-```sh
-export PATH="$HOME/Library/Python/3.14/bin:$PATH"
-cd /Users/hemingming/worker/Robot-M
+N32R16V 的 GPIO33..37 为 Octal 总线保留；GPIO47/48 不应未经核对就当成普通 3.3V UART 替代脚。
+
+## 5. Arduino / PlatformIO（仅在明确切换固件时使用）
+
+### 编译与串口
+
+从仓库根目录执行，需要 `pio` 在 PATH 中。配置文件里旧的 `monitor_port` 可能已过期，显式传入实际端口。
+
+```bash
+pio device list
 pio run
-pio run --target upload
+pio device monitor --port "$LOG_PORT" --baud 115200
 ```
 
-打开串口监视器：
+只有确认要覆盖小智固件时才上传：
 
-```sh
-pio device monitor --port /dev/cu.usbmodem5B900929761 --baud 115200
+```bash
+pio run --target upload --upload-port "$FLASH_PORT"
 ```
 
-以下命令必须输入到**串口监视器窗口**，不能在普通 Bash 终端执行：
+Arduino 启动时自动运行 `setup()` / `loop()`，不需要另一个启动命令。根目录当前没有独立主机测试框架；不要把 `pio test` 当作已有完整测试覆盖。
 
-```text
-servo ping 1
-servo scan 1 20
-servo setid 1 2
-servo move 1 512 100 2
-servo stop
+### Wi-Fi
+
+先确认本地文件不存在，再创建，避免覆盖已有凭据：
+
+```bash
+cp -n src/wifi_secrets.h.example src/wifi_secrets.h
 ```
 
-命令说明：
+在本地头文件填写 `wifi_secrets::kSsid` / `kPassword`；该文件被忽略，不提交真实凭据。此方式只用于 Arduino，小智使用设备配网界面。
+
+### Arduino 串口命令速查
+
+以下不是当前小智串口入口的能力，动作命令和 EEPROM 写入必须单独确认后执行。
 
 | 命令 | 作用 |
 | --- | --- |
-| `servo ping <id>` | 检查指定 ID 的舵机是否响应 |
-| `servo scan [first] [last]` | 扫描舵机 ID，默认范围为 1 到 20，只发送 Ping 不移动 |
-| `servo setid <old> <new>` | 修改舵机 ID；写入前解锁 EEPROM，写入后加锁 |
-| `servo move <id> <position> <speed> <acc>` | 控制单个舵机移动；SCS0017 位置范围为 0 到 1023 |
-| `servo stop` | 广播关闭扭力，停止保持力矩 |
+| `imu read` | 读取 BMI323 调试数据 |
+| `servo ping <id>`、`servo scan [first] [last]` | 只读 Ping，扫描默认 1..20 |
+| `servo setid <old> <new>` | 写 EEPROM 改 ID，仅连接一个舵机时使用 |
+| `servo move <id> <position> <speed> <acc>` | 单舵机移动，位置 0..1023；SCSCL 当前忽略 acc |
+| `servo stop` | 广播关闭扭力，可能失去支撑 |
+| `robot stand`、`robot forward` | 中位姿态/持续动作，未完成校准不要执行 |
+| `robot turn left`、`robot turn right`、`robot stop` | 转向/停止，需支撑结构 |
 
-#### ID 分配流程
+ID 配置流程：每次断电只接一个舵机，先 Ping 确认当前 ID，再按需 `setid`，成功后断电重启验证并贴标签，最后接入总线扫描。不要假定出厂 ID 一定是 1。禁止使用旧文档中的位置 2048 或范围 0..4095 来测试 SCS0017。
 
-每次只接一个舵机。默认舵机通常是 ID `1`：
+## 6. 常见问题与当天结论
 
-```text
-第1个舵机：保留 ID 1
-第2个舵机：servo setid 1 2
-第3个舵机：servo setid 1 3
-第4个舵机：servo setid 1 4
-...
-第12个舵机：servo setid 1 12
-```
-
-每次 `setid` 成功后给舵机断电，再换下一个未配置舵机。全部完成后接入总线并执行：
-
-```text
-servo scan 1 20
-```
-
-建议的功能映射：
-
-```text
-ID 1..6   两条腿，每条 3 个舵机
-ID 7..10  两条胳膊，每条 2 个舵机
-ID 11..12 屏幕的 2 个舵机
-```
-
-首次测试只接一个舵机，并确认 `servo ping` 成功后再执行 `servo move`。舵机周围应无负载、无卡死风险；发现异常立即输入 `servo stop` 或断开舵机动力电源。
-
-如果 USB 重插后串口名称变化，先执行：
-
-```sh
-pio device list
-```
-
-再把 `--port` 后面的路径替换为当前实际端口。
-```rust
-
-```
-
-    IIC HUB模块分线器I2C集线器
-    ESP32 GPIO38 -> HUB SDA  灰
-    ESP32 GPIO39 -> HUB SCL  白
-    ESP32 3.3V   -> HUB VCC  红
-    ESP32 GND    -> HUB GND  黑
-
-
-#### 当前显示屏接线
-
-照片中屏幕排针从左到右是：`SD_CS`、`CTP_INT`、`CTP_SDA`、`CTP_RST`、`CTP_SCL`、`SDO`、`LED`、`SCK`、`SDI`、`LCD_RS`、`LCD_RST`、`LCD_CS`、`GND`、`VCC`。
-
-| 屏幕引脚 | ESP32-S3 |
+| 现象 | 下一步 |
 | --- | --- |
-| SDO / MISO | GPIO13 |
-| SCK | GPIO12 |
-| SDI / MOSI | GPIO11 |
-| LCD_RS / DC | GPIO9 |
-| LCD_RST | GPIO8 |
-| LCD_CS | GPIO10 |
-| CTP_SCL | GPIO39 |
-| CTP_SDA | GPIO38 |
-| CTP_INT | GPIO7 |
-| CTP_RST | GPIO6 |
+| 找不到 USB 串口 | 先枚举；检查数据线、接口及供电，不对蓝牙端口执行烧录 |
+| 能看到串口但 `No serial data received` | 只说明下载握手失败；核对接口、GPIO19/20 冲突、BOOT/EN 时序，不能认定烧录成功或芯片损坏 |
+| `Staying in bootloader` | `--after no-reset` 的预期结果；松开 BOOT，短按 EN/RESET |
+| 串口打开后没有日志 | 检查 UART0/原生 USB 区别及 115200；短时间静默不代表舵机故障 |
+| 只有启动日志，没有查询结果 | 等 `Read-only servo console ready`，再发送命令；避免启动前发送导致命令丢失 |
+| 本地无应答、大头也查不到 | 核对 GPIO19 TX -> URT-2 RXD、GPIO20 RX <- URT-2 TXD，再查实际供电、共地、ID、波特率 |
+| 1、2 号能 Ping，但只有一个动 | Ping 不能证明位置写入成功；字节序已修复并烧录，实际动作仍待逐个验证，不直接启动整套步态 |
+| 小智拒绝 `servo move` 等 | 这是只读入口；不要混用 Arduino 命令 |
+| 屏幕方向错误 | 核对第 4 节方向参数及板卡配置 |
+| 麦克风无输入 | 首先核对第 4 节两套固件不同的 SCK/WS，再查电源与 SD |
+| TCRT5000 状态不变 | 检查 3.3V、共地、DO 和电位器；用实物校准极性 |
+| `pio` / `idf.py` 找不到 | 修正 PATH 或加载正确环境，不在不同固件工程中替换执行无关构建命令 |
 
-屏幕规格为 `5.0V/3.3V`，推荐 `5V` 供电，因此 `VCC` 接稳定的 `5V`，`GND` 与 ESP32 共地。背光电流约 `103mA`，`LED` 按屏幕模块的背光输入要求接线，不要让 ESP32 GPIO 直接承担背光电流；若 `LED` 不是板载限流输入，应通过限流或背光驱动供电。`SD_CS` 暂时不接。
+## 7. 项目入口与日常检查
 
-#### 音频接线
-
-##### INMP441 麦克风
-
-| INMP441 引脚 | ESP32-S3 |
+| 文件/目录 | 职责 |
 | --- | --- |
-| VDD | 3.3V |
-| GND | GND |
-| SCK | GPIO1 |
-| WS | GPIO2 |
-| SD | GPIO16 |
-| L/R | GND |
+| [src/main.cpp](src/main.cpp) | Arduino 生命周期、诊断和串口命令 |
+| [src/config/pin_def.h](src/config/pin_def.h)、[src/config/project_config.h](src/config/project_config.h) | Arduino 引脚与开关 |
+| [src/manager/robot_runtime.cpp](src/manager/robot_runtime.cpp) | Arduino 传感器快照与模式安全边界 |
+| [src/actuators/servo_bus.cpp](src/actuators/servo_bus.cpp)、[src/motion/limb_controller.cpp](src/motion/limb_controller.cpp) | Arduino 舵机驱动与动作 |
+| [platformio.ini](platformio.ini) | Arduino 板型、Flash/PSRAM、屏幕与依赖 |
+| [xiaozhi-esp32/main/boards/robot-m/config.h](xiaozhi-esp32/main/boards/robot-m/config.h) | 小智硬件映射 |
+| [xiaozhi-esp32/main/boards/robot-m/config.json](xiaozhi-esp32/main/boards/robot-m/config.json) | 小智板卡、唤醒词和构建配置 |
+| [xiaozhi-esp32/main/boards/robot-m/robot_m.cc](xiaozhi-esp32/main/boards/robot-m/robot_m.cc) | 小智板级初始化、MCP 和本地查询 |
+| [xiaozhi-esp32/main/boards/robot-m/scs_servo_bus.cc](xiaozhi-esp32/main/boards/robot-m/scs_servo_bus.cc) | 小智 UART 舵机协议 |
+| [xiaozhi-esp32/main/boards/robot-m/limb_controller.cc](xiaozhi-esp32/main/boards/robot-m/limb_controller.cc) | 小智动作循环 |
+| [xiaozhi-esp32/main/boards/robot-m/README.md](xiaozhi-esp32/main/boards/robot-m/README.md) | 小智板卡及离线语音补充说明 |
 
-##### MAX98357A 音频功放
+普通终端中的只读 Git 检查（仓库根目录）：
 
-| MAX98357A 引脚 | ESP32-S3 / 电源 |
-| --- | --- |
-| VIN | 稳定 5V |
-| GND | GND |
-| BCLK | GPIO17 |
-| LRC | GPIO18 |
-| DIN | GPIO15 |
-| SD | 3.3V |
-| GAIN | 暂时悬空 |
-| 喇叭 `+` | 喇叭正极 |
-| 喇叭 `-` | 喇叭负极 |
-
-注意：INMP441 使用 3.3V，MAX98357A 的 VIN 使用 5V；两个模块必须与 ESP32 共地。MAX98357A 的 `SD` 是启停控制脚，接 3.3V 使功放保持开启；`DIN` 才是音频数据输入。喇叭直接接功放的 `+` 和 `-`，不能把任一喇叭端接 ESP32 GND。`GAIN` 建议接 GND。小智固件中 GPIO17/18 只给功放使用，GPIO1/2 只给麦克风使用，GPIO16 只接麦克风数据，GPIO15 只接功放数据。
-
-#### 舵机供电
-
-12 个总线舵机使用电源板右侧的 `VADJ` 可调输出，经 URT-2 和舵机集线器供电：
-
-```text
-电池 -> 电源板输入
-电源板 VADJ+ -> URT-2/舵机集线器电源+
-电源板 GND   -> URT-2/舵机集线器 GND
-ESP32 GND     -> URT-2 信号地
+```bash
+git status --short
+git diff --stat
+git diff --check
 ```
 
-接线前断开舵机负载，用万用表测量并调节 `VADJ` 到舵机铭牌或数据手册规定的额定电压；不能按电池电压或电位器位置直接接入。VADJ 的最大输出电流、散热能力和瞬态电流必须满足 12 个舵机同时启动/堵转的需求；如果电源板规格不足，应改用独立的大电流舵机电源，并与 ESP32 共地。舵机电源不要从 ESP32 的 5V 或 3.3V 引脚取电，建议在 VADJ 输出增加保险丝和总线端电容。
+小智构建脚本的主机测试（`xiaozhi-esp32/` 内，不是舵机实测）：
 
-#### TCRT5000 红外模块
-
-当前使用两个带 LM393 比较器的 TCRT5000 模块，先使用数字输出 `DO`：
-
-| 模块 | VCC | GND | DO | AO |
-| --- | --- | --- | --- | --- |
-| 左侧 TCRT5000 | 3.3V | GND | GPIO14 | 暂不接 |
-| 右侧 TCRT5000 | 3.3V | GND | GPIO21 | 暂不接 |
-
-两个模块可以共用 3.3V 和 GND，但 `DO` 必须分别接不同 GPIO。先调节模块上的电位器设置检测灵敏度；`DO` 的高低电平逻辑可能因模块和电位器方向不同而相反，需要结合实际测试确认。`AO` 是模拟输出，暂时不接。
-
-#### Wi-Fi 连接
-
-ESP32-S3 使用 Wi-Fi STA 模式连接路由器。先复制 `src/wifi_secrets.h.example` 为 `src/wifi_secrets.h`，再填写本地 Wi-Fi 名称和密码：
-
-```cpp
-#pragma once
-
-namespace wifi_secrets {
-constexpr char kSsid[] = "你的WiFi名称";
-constexpr char kPassword[] = "你的WiFi密码";
-}  // namespace wifi_secrets
+```bash
+python3 -m unittest discover -s scripts/tests -v
 ```
 
-`src/wifi_secrets.h` 已加入 `.gitignore`，不会提交凭据。固件启动时最多等待 15 秒；连接成功会在 115200 串口输出 IP 地址，连接失败也不会阻塞屏幕和麦克风启动。上传命令：
-
-```sh
-pio run --target upload
-```
-
-#### 工程分层
-
-当前 PlatformIO 工程按以下职责组织，`src/main.cpp` 只负责 Arduino 生命周期和模块调度：
-
-```text
-src/
-├── config/       硬件引脚和系统开关
-├── hal/          I2C 等底层总线初始化
-├── drivers/      ST7796S 显示、I2S 麦克风/音频驱动
-├── manager/      RobotRuntime 安全状态机和设备业务管理
-├── network/      Wi-Fi 连接与后续小智通信入口
-├── main.cpp      setup/loop 主入口
-└── wifi_secrets.h 本地 Wi-Fi 凭据（已被 .gitignore 忽略）
-```
-
-后续接入小智时，优先在 `network/` 增加通信服务，在 `manager/` 增加语音会话状态，不把云端协议和 API 凭据放进硬件驱动层。
-
-#### 舵机与四肢动作分层
-
-舵机硬件和四肢动作单独分层，避免步态逻辑直接操作串口或舵机协议：
-
-```text
-src/
-├── actuators/
-│   └── servo_bus.h/.cpp       URT-2、舵机总线、目标位置、急停
-└── motion/
-    └── limb_controller.h/.cpp 四肢、站立、步态和动作编排
-```
-
-当前接口已经建立，但还没有自动驱动舵机。接入前必须确认 URT-2 的 TX/RX GPIO、波特率、舵机 ID、零位和 VADJ 电压；在这些参数确认前，固件不会发送动作指令。低电压和姿态异常仍由 `manager/robot_runtime` 作为安全边界处理。
-
-#### 小智独立工程
-
-小智使用官方 `xiaozhi-esp32` ESP-IDF 工程，与当前 PlatformIO/Arduino 硬件测试工程分开维护：
-
-```text
-Robot-M/
-├── src/                      当前硬件测试和 RobotRuntime
-└── xiaozhi-esp32/            小智 ESP-IDF 工程
-    └── main/boards/robot-m/  Robot-M 自定义板
-```
-
-小智板级配置已创建：
-
-- `main/boards/robot-m/config.h`
-- `main/boards/robot-m/config.json`
-- `main/boards/robot-m/robot_m.cc`
-- `main/boards/robot-m/README.md`
-
-小智使用的硬件映射：
-
-```text
-INMP441:   SCK/WS/SD = GPIO1/GPIO2/GPIO16
-MAX98357A: BCLK/LRC/DIN = GPIO17/GPIO18/GPIO15
-ST7796S:   SCK/MOSI/MISO/CS/DC/RST = GPIO12/11/13/10/9/8
-```
-
-小智工程要求 ESP-IDF 6.0.1 以上，推荐 6.1。配置好 ESP-IDF 后，在 `xiaozhi-esp32` 根目录执行：
-
-```sh
-python3 scripts/build.py robot-m --name robot-m
-```
-
-小智固件的完整编译和烧录命令见本文档前面的“快速开始”章节；不要把真实 Wi-Fi 密码或串口路径提交到仓库。
-
+Git 推送遇到 `Permission denied (publickey)` 时，可先执行 `ssh-add -l` 查看代理身份，再用正确的 GitHub SSH 身份测试；不要因为认证失败修改代码、重复提交或公开私钥。硬件调试无需反复执行 Git 推送。

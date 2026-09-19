@@ -2,6 +2,7 @@
 #define _ROBOT_M_SCS_SERVO_BUS_H_
 
 #include <cstdint>
+#include <mutex>
 
 #include <driver/gpio.h>
 #include <driver/uart.h>
@@ -26,6 +27,7 @@ private:
 
     uart_port_t port_ = UART_NUM_1;
     bool initialized_ = false;
+    std::recursive_mutex mutex_;
 };
 
 }  // namespace robot_m

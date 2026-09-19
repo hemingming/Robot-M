@@ -89,7 +89,8 @@ bool ScsServoBus::ReadAck(uint8_t id) {
 }
 
 bool ScsServoBus::Ping(uint8_t id) {
-    if (!initialized_ || id == 0 || id == kBroadcastId) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (!initialized_ || id == 0 || id >= kBroadcastId) {
         return false;
     }
     FlushInput();
@@ -98,6 +99,7 @@ bool ScsServoBus::Ping(uint8_t id) {
 }
 
 bool ScsServoBus::WritePosition(uint8_t id, int16_t position, uint16_t speed) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || id == 0 || id == kBroadcastId) {
         return false;
     }
@@ -110,12 +112,12 @@ bool ScsServoBus::WritePosition(uint8_t id, int16_t position, uint16_t speed) {
 
     uint8_t params[7];
     params[0] = kRegGoalPositionL;
-    params[1] = static_cast<uint8_t>(position & 0xFF);
-    params[2] = static_cast<uint8_t>((position >> 8) & 0xFF);
+    params[1] = static_cast<uint8_t>((position >> 8) & 0xFF);
+    params[2] = static_cast<uint8_t>(position & 0xFF);
     params[3] = 0;  // Time low：不使用定时位置，交由 Speed 控制运动时间。
     params[4] = 0;  // Time high
-    params[5] = static_cast<uint8_t>(speed & 0xFF);
-    params[6] = static_cast<uint8_t>((speed >> 8) & 0xFF);
+    params[5] = static_cast<uint8_t>((speed >> 8) & 0xFF);
+    params[6] = static_cast<uint8_t>(speed & 0xFF);
 
     FlushInput();
     WriteBuffer(id, kInstWrite, params, sizeof(params));
@@ -123,6 +125,7 @@ bool ScsServoBus::WritePosition(uint8_t id, int16_t position, uint16_t speed) {
 }
 
 bool ScsServoBus::SetTorque(uint8_t id, bool enable) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_ || id == 0) {
         return false;
     }
