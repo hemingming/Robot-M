@@ -90,9 +90,13 @@ void handleServoConsole() {
     Serial.println("Robot turn right started.");
   } else if (command.startsWith("robot stop")) {
     g_limbController.stop();
-    g_runtime.requestMode(robot::RobotMode::EmergencyStop);
-    Serial.println("Robot emergency stop sent.");
+    g_runtime.requestMode(robot::RobotMode::Standby);
+    Serial.println("Robot stop sent, mode set to standby.");
   } else if (command.startsWith("i2c scan")) {
+    if (!robot::config::kI2cEnabled) {
+      Serial.println("I2C disabled (kI2cEnabled=false).");
+      return;
+    }
     robot::hal::i2cScan();
   } else if (command.startsWith("battery cal ")) {
     if (!robot::config::kBatteryMonitoringEnabled) {
@@ -128,6 +132,10 @@ void handleServoConsole() {
   } else if (command.startsWith("battery")) {
     printBatteryDiagnostic();
   } else if (command.startsWith("imu read")) {
+    if (!robot::config::kI2cEnabled) {
+      Serial.println("I2C disabled (kI2cEnabled=false).");
+      return;
+    }
     robot::hal::Bmi323RawData data;
     if (robot::hal::readBmi323Raw(data)) {
       Serial.printf("BMI323 chip=0x%04X accel=(%d,%d,%d) gyro=(%d,%d,%d)\n",
@@ -211,7 +219,7 @@ void initAsr() {
     }
     if (action == robot::voice::AsrAction::Stop) {
       g_limbController.stop();
-      g_runtime.requestMode(robot::RobotMode::EmergencyStop);
+      g_runtime.requestMode(robot::RobotMode::Standby);
       return;
     }
     if (!g_runtime.isAwake()) {
@@ -248,9 +256,9 @@ void initSensors() {
   pinMode(robot::kTcrtLeftDigitalPin, INPUT);
   pinMode(robot::kTcrtRightDigitalPin, INPUT);
 
-  // 传感器开关用于显示屏/音频调试阶段，关闭后不访问 I2C 传感器。
-  if (!robot::kSensorsEnabled) {
-    Serial.println("Sensors disabled for display test.");
+  // ToF 挂在 Wire 总线上，I2C 未启用时同样不能访问，否则 begin 必然失败刷日志。
+  if (!robot::kSensorsEnabled || !robot::config::kI2cEnabled) {
+    Serial.println("Sensors disabled.");
     return;
   }
 #if __has_include(<SparkFun_VL53L1X.h>)
@@ -271,16 +279,21 @@ void updateRuntime(uint32_t nowMs) {
   sensors.batteryVoltage = readBatteryVoltage();
   sensors.servoBusHealthy = g_servoBus.healthy();
 
-  robot::hal::Bmi323RawData imuData;
-  if (robot::hal::readBmi323Raw(imuData)) {
-    const float accelX = imuData.accelX / 8192.0f;
-    const float accelY = imuData.accelY / 8192.0f;
-    const float accelZ = imuData.accelZ / 8192.0f;
-    sensors.rollDegrees = atan2f(accelY, accelZ) * 57.29578f;
-    sensors.pitchDegrees =
-        atan2f(-accelX, sqrtf(accelY * accelY + accelZ * accelZ)) * 57.29578f;
-    sensors.yawRateDegreesPerSecond = imuData.gyroZ / 65.536f;
-    sensors.imuHealthy = imuData.chipId == 0x0043;
+  if (robot::config::kI2cEnabled) {
+    robot::hal::Bmi323RawData imuData;
+    if (robot::hal::readBmi323Raw(imuData)) {
+      const float accelX = imuData.accelX / 8192.0f;
+      const float accelY = imuData.accelY / 8192.0f;
+      const float accelZ = imuData.accelZ / 8192.0f;
+      sensors.rollDegrees = atan2f(accelY, accelZ) * 57.29578f;
+      sensors.pitchDegrees =
+          atan2f(-accelX, sqrtf(accelY * accelY + accelZ * accelZ)) * 57.29578f;
+      sensors.yawRateDegreesPerSecond = imuData.gyroZ / 65.536f;
+      sensors.imuHealthy = imuData.chipId == 0x0043;
+    }
+  } else {
+    // I2C 未启用时视 IMU 为健康，避免 Walking 状态被误判为姿态异常。
+    sensors.imuHealthy = true;
   }
 
 #if __has_include(<SparkFun_VL53L1X.h>)
@@ -346,8 +359,12 @@ void setup() {
   g_servoBus.begin();
   g_limbController.begin();
   initAsr();
-  robot::hal::initI2cBus();
-  robot::hal::printI2cDeviceDiagnostics();
+  if (robot::config::kI2cEnabled) {
+    robot::hal::initI2cBus();
+    robot::hal::printI2cDeviceDiagnostics();
+  } else {
+    Serial.println("I2C disabled (kI2cEnabled=false).");
+  }
   printBatteryDiagnostic();
   robot::drivers::initDisplay();
   initSensors();
