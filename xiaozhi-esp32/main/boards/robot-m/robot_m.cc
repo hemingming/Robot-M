@@ -4,6 +4,7 @@
 #include "application.h"
 #include "button.h"
 #include "config.h"
+#include "led/single_led.h"
 #include "mcp_server.h"
 #include "limb_controller.h"
 #include "scs_servo_bus.h"
@@ -94,6 +95,20 @@ private:
 
     void InitializeServoBus() {
         servo_bus_.Init(SERVO_UART_PORT, SERVO_UART_TX_PIN, SERVO_UART_RX_PIN, SERVO_UART_BAUD_RATE);
+    }
+
+    void InitializePeripheralPower() {
+        // 与 Arduino 固件一致：拉高 GPIO5 打开外设供电（稳压板使能）。
+        // 舵机动力和电源板指示灯依赖该电源，必须在舵机初始化前完成。
+        gpio_config_t power_pin = {};
+        power_pin.pin_bit_mask = 1ULL << PERIPHERAL_POWER_ENABLE_GPIO;
+        power_pin.mode = GPIO_MODE_OUTPUT;
+        power_pin.pull_up_en = GPIO_PULLUP_DISABLE;
+        power_pin.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        power_pin.intr_type = GPIO_INTR_DISABLE;
+        gpio_config(&power_pin);
+        gpio_set_level(PERIPHERAL_POWER_ENABLE_GPIO, 1);
+        ESP_LOGI(TAG, "Peripheral power enable (GPIO5) set HIGH");
     }
 
     void HandleServoConsoleLine(const char* line) {
@@ -282,6 +297,7 @@ private:
 public:
     RobotMBoard() : boot_button_(BOOT_BUTTON_GPIO) {
         // 构造板卡对象时完成底层外设初始化，随后由框架取得音频和显示对象。
+        InitializePeripheralPower();
         InitializeSpi();
         InitializeDisplay();
         InitializeButtons();
@@ -301,6 +317,13 @@ public:
     }
 
     void StopMotion() override { limb_controller_.Stop(); }
+
+    Led* GetLed() override {
+        // 板载 RGB 状态灯（GPIO38）：绿色=说话/待机提示，蓝色=唤醒/连接，红色=聆听。
+        // 待机状态按小智默认逻辑熄灯。
+        static SingleLed led_strip(BUILTIN_LED_GPIO);
+        return &led_strip;
+    }
 
     Display* GetDisplay() override { return display_; }
 

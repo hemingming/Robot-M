@@ -4,9 +4,22 @@
 
 #define TAG "SingleLed"
 
+// 板级可通过 config.h 覆盖颜色通道排列与亮度，未定义时保持小智默认值。
+#ifdef BOARD_LED_BRIGHTNESS_DEFAULT
+#define DEFAULT_BRIGHTNESS BOARD_LED_BRIGHTNESS_DEFAULT
+#else
 #define DEFAULT_BRIGHTNESS 4
+#endif
+#ifdef BOARD_LED_BRIGHTNESS_HIGH
+#define HIGH_BRIGHTNESS BOARD_LED_BRIGHTNESS_HIGH
+#else
 #define HIGH_BRIGHTNESS 16
+#endif
+#ifdef BOARD_LED_BRIGHTNESS_LOW
+#define LOW_BRIGHTNESS BOARD_LED_BRIGHTNESS_LOW
+#else
 #define LOW_BRIGHTNESS 2
+#endif
 
 #define BLINK_INFINITE -1
 
@@ -20,7 +33,11 @@ SingleLed::SingleLed(gpio_num_t gpio) {
     led_strip_config_t strip_config = {};
     strip_config.strip_gpio_num = gpio;
     strip_config.max_leds = 1;
+#ifdef BOARD_LED_COLOR_COMPONENT_FORMAT
+    strip_config.color_component_format = BOARD_LED_COLOR_COMPONENT_FORMAT;
+#else
     strip_config.color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB;
+#endif
     strip_config.led_model = LED_MODEL_WS2812;
 
     led_strip_rmt_config_t rmt_config = {};

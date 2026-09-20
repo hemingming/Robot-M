@@ -223,12 +223,13 @@ servo scan 1 20
 
 | 功能 | 引脚/配置 | 状态/注意事项 |
 | --- | --- | --- |
-| I2C HUB、BMI323、VL53L1X | SDA GPIO38，SCL GPIO39，400kHz | HUB/上拉使用兼容的 3.3V 电平 |
+| I2C HUB、BMI323、VL53L1X | SDA GPIO38，SCL GPIO39，400kHz | HUB/上拉使用兼容的 3.3V 电平；GPIO38 与板载 RGB 状态灯共用（RGB 为探针实测确认，I2C 启用前须把 HUB 挪走） |
+| 板载 RGB 状态灯 | GPIO38（探针实测；官方 v1.1 接法） | WS2812 但 R/G 通道与标准对调，固件用 RGB 字节排列；亮度宏已调至 24~96/255 |
 | BMI323 | 地址 0x68；CS 接 3.3V、SA0 接 GND | Arduino 有 `imu read` 调试入口 |
 | VL53L1X | 默认地址 0x29 | Arduino 测距受配置开关控制 |
 | 左/右 TCRT5000 DO | GPIO14 / GPIO21 | VCC 3.3V、共地，AO 暂不接 |
 | 电池采样 | GPIO4 | Arduino；必须分压，电池不能直连 ADC |
-| 外设供电使能 | GPIO5 | Arduino；是否接稳压板使能需核对实物 |
+| 外设供电使能 | GPIO5 | Arduino 与小智均在启动时拉高；是否接稳压板使能需核对实物 |
 | 外接 ASR UART | TX GPIO41、RX GPIO40 | Arduino 预留/配置，不是小智麦克风语音通道 |
 
 TCRT5000 数字输出可能低有效，先用不同颜色/距离物体测试并调电位器；Arduino 日志示例为 `TCRT5000: left=1 right=1`。未校准前不能把它当作可靠的悬崖保护。小智不能默认继承 Arduino 的传感器及 RobotRuntime 安全逻辑。
@@ -299,6 +300,9 @@ ID 配置流程：每次断电只接一个舵机，先 Ping 确认当前 ID，�
 | 麦克风无输入 | 首先核对第 4 节两套固件不同的 SCK/WS，再查电源与 SD |
 | TCRT5000 状态不变 | 检查 3.3V、共地、DO 和电位器；用实物校准极性 |
 | `pio` / `idf.py` 找不到 | 修正 PATH 或加载正确环境，不在不同固件工程中替换执行无关构建命令 |
+| `idf.py flash` 报 python/python3 环境不一致 | 用 2.3 节 esptool 直烧命令；不要 `idf.py fullclean`，会丢弃构建缓存 |
+| `pio device monitor` 报 requires an interactive terminal | 管道/脚本里用第 5 节 pyserial 片段直读 |
+| 串口能打开但固件无输出 | 先确认 pyserial 已 `dtr = True`（S3 原生 USB CDC 要求）；再查残留进程占用端口（`ps aux | grep serial` 后 kill）；按过 BOOT 复位的板子可能停在 ROM 下载模式，短按 RST 或跑一次 `esptool chip_id` 即恢复运行 |
 
 ## 7. 项目入口与日常检查
 
@@ -331,4 +335,5 @@ python3 -m unittest discover -s scripts/tests -v
 ```
 
 Git 推送遇到 `Permission denied (publickey)` 时，可先执行 `ssh-add -l` 查看代理身份，再用正确的 GitHub SSH 身份测试；不要因为认证失败修改代码、重复提交或公开私钥。硬件调试无需反复执行 Git 推送。
+
 

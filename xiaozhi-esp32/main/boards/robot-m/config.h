@@ -20,6 +20,18 @@
 #define VOLUME_UP_BUTTON_GPIO GPIO_NUM_NC
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_NC
 
+// 板载 RGB 状态灯。2026-09-20 用探针固件实测确认接在 GPIO38（官方 v1.1 接法），
+// 此前"灯不亮"是因为小智待机状态本就熄灯且默认亮度仅 4~16/255。
+// 注意：GPIO38 同时在下方触摸预留里定义为 I2C_SDA_PIN，且当前外接 HUB 的 SDA 也接在此引脚；
+// I2C 尚未启用所以暂不冲突，未来启用 I2C（触摸/传感器）前必须把 HUB 挪到其他引脚并同步改配置。
+#define BUILTIN_LED_GPIO GPIO_NUM_38
+// 本板 RGB 的 R/G 通道与标准 WS2812 对调（探针实测发红显示绿），因此用 RGB 字节排列。
+#define BOARD_LED_COLOR_COMPONENT_FORMAT LED_STRIP_COLOR_COMPONENT_FMT_RGB
+// 默认亮度 4~16/255 肉眼难辨，调高到正常可辨水平。
+#define BOARD_LED_BRIGHTNESS_DEFAULT 32
+#define BOARD_LED_BRIGHTNESS_LOW 24
+#define BOARD_LED_BRIGHTNESS_HIGH 96
+
 // 4.0 英寸 ST7796S SPI 屏。物理面板为 480x320，应用坐标按竖屏 320x480 使用。
 #define DISPLAY_SPI_MODE 0
 #define DISPLAY_SPI_HOST SPI2_HOST
@@ -54,5 +66,9 @@
 #define SERVO_UART_TX_PIN GPIO_NUM_19
 #define SERVO_UART_RX_PIN GPIO_NUM_20
 #define SERVO_UART_BAUD_RATE 1000000
+
+// 外设供电使能（稳压板/舵机动力），与 Arduino 固件 pin_def.h 的 kPowerEnable=5 一致。
+// 不拉高时外设电源板不工作：舵机无供电、电源指示灯不亮。
+#define PERIPHERAL_POWER_ENABLE_GPIO GPIO_NUM_5
 
 #endif  // _ROBOT_M_BOARD_CONFIG_H_
