@@ -77,8 +77,22 @@ int16_t decodeWord(const uint8_t* bytes) {
 }  // namespace
 
 void initI2cBus() {
+  // DIAG: 临时回退到 100kHz 验证 400kHz 是否为 I2C timeout 根因。
   Wire.begin(robot::kI2cSdaPin, robot::kI2cSclPin, 100000);
   Wire.setTimeOut(50);
+}
+
+void i2cScan() {
+  Serial.println("I2C scan 0x01..0x7F:");
+  int found = 0;
+  for (uint8_t addr = 1; addr <= 0x7F; ++addr) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("  0x%02X found\n", addr);
+      ++found;
+    }
+  }
+  Serial.printf("Scan complete: %d device(s) found.\n", found);
 }
 
 void printI2cDeviceDiagnostics() {

@@ -32,13 +32,29 @@ uint16_t g_lastTofDistanceMm = 0;
 uint8_t g_lastTofStatus = 255;
 #endif
 
+// ADC 读到的是分压后的引脚电压，必须乘回分压比才是电池真实电压。
+// 所有电池电压读数统一走这里，避免换算逻辑散落在状态采样和诊断中。
+// 监控被禁用时返回一个安全电压（8.0V，远高于 6.6V 阈值），
+// 避免悬空引脚被误读为低电压导致状态机锁入 EmergencyStop。
+float readBatteryVoltage() {
+  if (!robot::config::kBatteryMonitoringEnabled) {
+    return 8.0f;
+  }
+  return analogReadMilliVolts(robot::kBatteryVoltagePin) / 1000.0f *
+         robot::config::kBatteryAdcDividerRatio;
+}
+
 void printBatteryDiagnostic() {
-  // 同时打印原始 ADC 值和 Arduino 校准后的毫伏值，便于校准分压比例。
+  if (!robot::config::kBatteryMonitoringEnabled) {
+    Serial.println("Battery monitoring disabled (kBatteryMonitoringEnabled=false).");
+    return;
+  }
+  // 同时打印原始 ADC 值、Arduino 校准后的毫伏值和换算后的电池电压，便于校准分压比例。
   const int rawValue = analogRead(robot::kBatteryVoltagePin);
   const uint32_t millivolts = analogReadMilliVolts(robot::kBatteryVoltagePin);
-  Serial.printf("Battery ADC GPIO %u: raw=%d, calibrated=%lu mV\n",
+  Serial.printf("Battery ADC GPIO %u: raw=%d, calibrated=%lu mV, battery=%.2f V\n",
                 robot::kBatteryVoltagePin, rawValue,
-                static_cast<unsigned long>(millivolts));
+                static_cast<unsigned long>(millivolts), readBatteryVoltage());
 }
 
 void handleServoConsole() {
@@ -76,6 +92,41 @@ void handleServoConsole() {
     g_limbController.stop();
     g_runtime.requestMode(robot::RobotMode::EmergencyStop);
     Serial.println("Robot emergency stop sent.");
+  } else if (command.startsWith("i2c scan")) {
+    robot::hal::i2cScan();
+  } else if (command.startsWith("battery cal ")) {
+    if (!robot::config::kBatteryMonitoringEnabled) {
+      Serial.println("Battery monitoring disabled; cannot calibrate.");
+      Serial.println("Enable kBatteryMonitoringEnabled and wire GPIO4 to the divider first.");
+    } else {
+    const float realVoltage = command.substring(12).toFloat();
+    if (realVoltage <= 0.1f) {
+      Serial.println("Usage: battery cal <real_voltage_from_multimeter>");
+      Serial.println("Example: battery cal 7.80");
+    } else {
+      // 多次采样取平均，降低 ADC 单次抖动对校准结果的影响。
+      uint32_t sumMv = 0;
+      const int samples = 8;
+      for (int i = 0; i < samples; ++i) {
+        sumMv += analogReadMilliVolts(robot::kBatteryVoltagePin);
+        delay(5);
+      }
+      const float adcPinV =
+          (sumMv / static_cast<float>(samples)) / 1000.0f;
+      const float recommended =
+          (adcPinV > 0.001f) ? (realVoltage / adcPinV) : 0.0f;
+      Serial.printf("ADC pin (avg of %d): %.3f V\n", samples, adcPinV);
+      Serial.printf("Real battery (multimeter): %.2f V\n", realVoltage);
+      Serial.printf("-> Recommended kBatteryAdcDividerRatio = %.4ff\n",
+                    recommended);
+      Serial.printf("Current ratio = %.4ff -> battery = %.2f V\n",
+                    robot::config::kBatteryAdcDividerRatio,
+                    readBatteryVoltage());
+      Serial.println("Edit src/config/project_config.h and rebuild to apply.");
+    }
+    }
+  } else if (command.startsWith("battery")) {
+    printBatteryDiagnostic();
   } else if (command.startsWith("imu read")) {
     robot::hal::Bmi323RawData data;
     if (robot::hal::readBmi323Raw(data)) {
@@ -131,7 +182,7 @@ void handleServoConsole() {
     g_servoBus.stopAll();
     Serial.println("Servo stop sent.");
   } else {
-    Serial.println("Commands: imu read; robot stand; robot forward; robot turn left; robot turn right; robot stop; servo ping <id>; servo scan [first] [last]; servo setid <old> <new>; servo move <id> <position> <speed> <acc>; servo stop");
+    Serial.println("Commands: battery; battery cal <real_voltage>; i2c scan; imu read; robot stand; robot forward; robot turn left; robot turn right; robot stop; servo ping <id>; servo scan [first] [last]; servo setid <old> <new>; servo move <id> <position> <speed> <acc>; servo stop");
   }
 }
 
@@ -217,8 +268,7 @@ void updateRuntime(uint32_t nowMs) {
   // 硬件层先收集一份普通数据快照，再交给状态机统一决定模式。
   // 这样 RobotRuntime 不需要依赖 ADC、I2C 或具体传感器驱动。
   robot::SensorSnapshot sensors;
-  sensors.batteryVoltage =
-      analogReadMilliVolts(robot::kBatteryVoltagePin) / 1000.0f;
+  sensors.batteryVoltage = readBatteryVoltage();
   sensors.servoBusHealthy = g_servoBus.healthy();
 
   robot::hal::Bmi323RawData imuData;
@@ -255,7 +305,7 @@ void updateRuntime(uint32_t nowMs) {
 
 void printStatus() {
   // 周期性输出最小诊断信息，避免影响主循环时序。
-  const float batteryVoltage = analogReadMilliVolts(robot::kBatteryVoltagePin) / 1000.0f;
+  const float batteryVoltage = readBatteryVoltage();
   Serial.printf("Battery: %.2f V\n", batteryVoltage);
   static int lastLeftTcrt = -1;
   static int lastRightTcrt = -1;
