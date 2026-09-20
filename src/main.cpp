@@ -186,11 +186,49 @@ void handleServoConsole() {
     target.acceleration = static_cast<uint16_t>(acceleration);
     Serial.printf("Servo %d move: %s\n", id,
                   g_servoBus.sendTarget(target) ? "OK" : "FAIL");
+  } else if (command.startsWith("servo center ")) {
+    id = command.substring(13).toInt();
+    robot::actuators::ServoTarget target;
+    target.id = static_cast<uint8_t>(id);
+    target.position = 512;
+    target.speed = 100;
+    target.acceleration = 2;
+    Serial.printf("Servo %d center: %s\n", id,
+                  g_servoBus.sendTarget(target) ? "OK" : "FAIL");
+  } else if (command.startsWith("servo sweep ")) {
+    int fromPosition = 0;
+    int toPosition = 0;
+    if (sscanf(command.c_str() + 12, "%d %d %d", &id, &fromPosition,
+               &toPosition) == 3 &&
+        id > 0 && id != 0xFE) {
+      const int step = (toPosition >= fromPosition) ? 10 : -10;
+      bool failed = false;
+      for (int pos = fromPosition;
+           !failed && (step > 0 ? pos <= toPosition : pos >= toPosition);
+           pos += step) {
+        robot::actuators::ServoTarget target;
+        target.id = static_cast<uint8_t>(id);
+        target.position = static_cast<int16_t>(constrain(pos, 0, 1023));
+        target.speed = 300;
+        target.acceleration = 2;
+        if (!g_servoBus.sendTarget(target)) {
+          Serial.printf("Servo %d sweep failed at %d\n", id, pos);
+          failed = true;
+        }
+        delay(80);
+      }
+      if (!failed) {
+        Serial.printf("Servo %d sweep %d -> %d done.\n", id, fromPosition,
+                      toPosition);
+      }
+    } else {
+      Serial.println("Usage: servo sweep <id> <from> <to>  (0..1023)");
+    }
   } else if (command.startsWith("servo stop")) {
     g_servoBus.stopAll();
     Serial.println("Servo stop sent.");
   } else {
-    Serial.println("Commands: battery; battery cal <real_voltage>; i2c scan; imu read; robot stand; robot forward; robot turn left; robot turn right; robot stop; servo ping <id>; servo scan [first] [last]; servo setid <old> <new>; servo move <id> <position> <speed> <acc>; servo stop");
+    Serial.println("Commands: battery; battery cal <real_voltage>; i2c scan; imu read; robot stand; robot forward; robot turn left; robot turn right; robot stop; servo ping <id>; servo scan [first] [last]; servo setid <old> <new>; servo move <id> <position> <speed> <acc>; servo center <id>; servo sweep <id> <from> <to>; servo stop");
   }
 }
 

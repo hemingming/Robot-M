@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <bmi323.h>
 
+#include "../config/project_config.h"
 #include "../robot_config.h"
 
 namespace robot::hal {
@@ -77,8 +78,7 @@ int16_t decodeWord(const uint8_t* bytes) {
 }  // namespace
 
 void initI2cBus() {
-  // DIAG: 临时回退到 100kHz 验证 400kHz 是否为 I2C timeout 根因。
-  Wire.begin(robot::kI2cSdaPin, robot::kI2cSclPin, 100000);
+  Wire.begin(robot::kI2cSdaPin, robot::kI2cSclPin, robot::kI2cClockSpeed);
   Wire.setTimeOut(50);
 }
 
@@ -96,6 +96,10 @@ void i2cScan() {
 }
 
 void printI2cDeviceDiagnostics() {
+  if (!robot::config::kI2cEnabled) {
+    Serial.println("I2C bus disabled (kI2cEnabled=false).");
+    return;
+  }
   Serial.printf("I2C bus: SDA=GPIO%u, SCL=GPIO%u\n", robot::kI2cSdaPin,
                 robot::kI2cSclPin);
   probeDevice(robot::kTofAddress, "ToF");

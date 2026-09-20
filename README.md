@@ -1,3 +1,4 @@
+
 # Robot-M 开发与接线手册
 
 ## 1. 先看这里
@@ -31,7 +32,7 @@
 
 从仓库根目录打开终端。推荐 ESP-IDF 6.1，最低 6.0.1，不使用 IDF 5.x。SDK 路径按本机安装位置调整；统一使用 `python3`。
 
-```bash
+```sh
 cd xiaozhi-esp32
 source "$HOME/esp/esp-idf/export.sh"
 idf.py --version
@@ -47,7 +48,7 @@ python3 -m serial.tools.list_ports -v
 
 在当前终端设置实际端口，下面是占位符，必须替换：
 
-```bash
+```sh
 export FLASH_PORT=/dev/cu.usbmodemXXXX
 export LOG_PORT=/dev/cu.usbmodemYYYY
 ```
@@ -56,7 +57,7 @@ export LOG_PORT=/dev/cu.usbmodemYYYY
 
 工作目录：`xiaozhi-esp32/`。
 
-```bash
+```sh
 python3 scripts/build.py robot-m --name robot-m
 ```
 
@@ -66,7 +67,7 @@ python3 scripts/build.py robot-m --name robot-m
 
 工作目录：`xiaozhi-esp32/`。先关闭占用端口的串口监视器，并按前面的安全要求隔离舵机和原生 USB 引脚。
 
-```bash
+```sh
 idf.py -p "$FLASH_PORT" flash
 ```
 
@@ -78,7 +79,7 @@ idf.py -p "$FLASH_PORT" flash
 2. 按住 BOOT，短按 EN/RESET。再次枚举端口，确认出现原生 USB 设备。
 3. 在已完成编译的 `xiaozhi-esp32/` 目录运行下面命令。若保持 BOOT 按住，看到 `Connected to ESP32-S3` / `Stub flasher running` 后即可松开，不必按完整个烧录过程。
 
-```bash
+```sh
 cd build
 python3 -m esptool --chip esp32s3 \
   --port "$FLASH_PORT" --baud 460800 \
@@ -95,7 +96,7 @@ cd ..
 
 仅应用更新的可选命令（工作目录仍为 `xiaozhi-esp32/`）：
 
-```bash
+```sh
 idf.py -p "$FLASH_PORT" app-flash
 ```
 
@@ -105,13 +106,13 @@ idf.py -p "$FLASH_PORT" app-flash
 
 工作目录：`xiaozhi-esp32/`，使用板载转串口的 `$LOG_PORT`。
 
-```bash
+```sh
 idf.py -p "$LOG_PORT" monitor
 ```
 
 退出通常为 `Ctrl+]`。IDF monitor 的连接过程可能复位设备，机械结构须处于安全状态。需要本地回显和输入 `servo` 命令时，也可使用 pyserial：
 
-```bash
+```sh
 python3 -m serial.tools.miniterm "$LOG_PORT" 115200 \
   --raw --echo --dtr 0 --rts 0
 ```
@@ -191,7 +192,7 @@ servo scan 1 20
 - TX/RX/GND 不是给 URT-2 供电的线路。逻辑供电来自哪个输入、是否与舵机电源相连，取决于 URT-2 实际板型。
 - 舵机动力由符合额定电压和电流要求的电源，经动力输入/集线器分配。先核对板型与供电路径，再用万用表测舵机 V+ 对 GND；不要根据电池标称或电位器位置推断。
 - 12 个舵机的启动/堵转电流、稳压板散热及导线载流能力必须评估，动力侧建议保险丝；不能默认 USB 或现有小稳压板可以带全部舵机。
-- 建议 ID 分配：1..6 腿部、7..10 手臂、11..12 头部。当前动作代码只使用 1..6，其他分配仍是规划。
+- 已确认 ID 分配（2026-09-20）：1..3 左腿、4..6 右腿、7..8 左臂、9..10 右臂、11 屏幕左右摇头、12 屏幕上下点头。当前动作代码只使用 1..6，手臂/头部动作待标定后实现。
 
 ### 4.3 ST7796S 屏幕（小智与 Arduino 主要 SPI 引脚一致）
 
@@ -247,7 +248,7 @@ N32R16V 的 GPIO33..37 为 Octal 总线保留；GPIO47/48 不应未经核对就�
 
 从仓库根目录执行，需要 `pio` 在 PATH 中。配置文件里旧的 `monitor_port` 可能已过期，显式传入实际端口。
 
-```bash
+```sh
 pio device list
 pio run
 pio device monitor --port "$LOG_PORT" --baud 115200
@@ -255,7 +256,7 @@ pio device monitor --port "$LOG_PORT" --baud 115200
 
 只有确认要覆盖小智固件时才上传：
 
-```bash
+```sh
 pio run --target upload --upload-port "$FLASH_PORT"
 ```
 
@@ -265,7 +266,7 @@ Arduino 启动时自动运行 `setup()` / `loop()`，不需要另一个启动命
 
 先确认本地文件不存在，再创建，避免覆盖已有凭据：
 
-```bash
+```sh
 cp -n src/wifi_secrets.h.example src/wifi_secrets.h
 ```
 
@@ -281,6 +282,8 @@ cp -n src/wifi_secrets.h.example src/wifi_secrets.h
 | `servo ping <id>`、`servo scan [first] [last]` | 只读 Ping，扫描默认 1..20 |
 | `servo setid <old> <new>` | 写 EEPROM 改 ID，仅连接一个舵机时使用 |
 | `servo move <id> <position> <speed> <acc>` | 单舵机移动，位置 0..1023；SCSCL 当前忽略 acc |
+| `servo center <id>` | 单舵机回到位置 512，用于零位确认 |
+| `servo sweep <id> <from> <to>` | 10 位置步进缓慢扫动找机械限位；异响/卡住立即 `servo stop` |
 | `servo stop` | 广播关闭扭力，可能失去支撑 |
 | `robot stand`、`robot forward` | 中位姿态/持续动作，未完成校准不要执行 |
 | `robot turn left`、`robot turn right`、`robot stop` | 转向/停止，需支撑结构 |
@@ -322,7 +325,7 @@ ID 配置流程：每次断电只接一个舵机，先 Ping 确认当前 ID，�
 
 普通终端中的只读 Git 检查（仓库根目录）：
 
-```bash
+```sh
 git status --short
 git diff --stat
 git diff --check
@@ -330,8 +333,9 @@ git diff --check
 
 小智构建脚本的主机测试（`xiaozhi-esp32/` 内，不是舵机实测）：
 
-```bash
+```sh
 python3 -m unittest discover -s scripts/tests -v
 ```
 
 Git 推送遇到 `Permission denied (publickey)` 时，可先执行 `ssh-add -l` 查看代理身份，再用正确的 GitHub SSH 身份测试；不要因为认证失败修改代码、重复提交或公开私钥。硬件调试无需反复执行 Git 推送。
+
