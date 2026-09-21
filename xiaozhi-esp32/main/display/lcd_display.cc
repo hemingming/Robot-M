@@ -79,7 +79,16 @@ LcdDisplay::LcdDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_
 
     // Load theme from settings
     Settings settings("display", false);
-    std::string theme_name = settings.GetString("theme", "light");
+    std::string theme_name = settings.GetString("theme", "dark");
+    // 旧固件默认 light，且字体初始化时会把当前主题固化回写 NVS，导致设备擦除或
+    // 升级后一直停留在白底。robot-m 首次运行新固件时一次性纠正为 dark；迁移标记
+    // 落盘后不再干预，用户仍可通过 MCP 自由切换 light/dark。
+    if (!settings.GetBool("theme_fix_v1", false)) {
+        theme_name = "dark";
+        Settings rw_settings("display", true);
+        rw_settings.SetString("theme", theme_name);
+        rw_settings.SetBool("theme_fix_v1", true);
+    }
     current_theme_ = LvglThemeManager::GetInstance().GetTheme(theme_name);
 
     // Create a timer to hide the preview image
