@@ -766,7 +766,8 @@ elseif(CONFIG_BOARD_TYPE_ROBOT_M)
     set(BOARD_DIR "robot-m")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_30_4)
     set(BUILTIN_ICON_FONT font_material_symbols_30_4)
-    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_128)
+    # 自定义像素机甲表情包：main/boards/robot-m/emoji（GIF 动图）
+    set(DEFAULT_EMOJI_COLLECTION robot-m)
 elseif(CONFIG_BOARD_TYPE_ZHENGCHEN_1_54TFT_ML307)
     set(BOARD_DIR "zhengchen/1.54tft-ml307")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_20_4)
@@ -1317,6 +1318,7 @@ function(build_default_assets_bin)
         list(APPEND BUILD_ARGS "--emoji_collection" "${DEFAULT_EMOJI_COLLECTION}")
         file(GLOB DEFAULT_EMOJI_FILES CONFIGURE_DEPENDS
             "${NOTO_FONTS_PATH}/png/${DEFAULT_EMOJI_COLLECTION}/*"
+            "${CMAKE_CURRENT_SOURCE_DIR}/boards/${DEFAULT_EMOJI_COLLECTION}/emoji/*"
         )
         list(APPEND DEFAULT_ASSETS_DEPENDENCIES ${DEFAULT_EMOJI_FILES})
     endif()

@@ -805,6 +805,14 @@ def get_emoji_collection_path(default_emoji_collection, noto_fonts_path, project
             print("Warning: project_root not provided, cannot locate otto-gif collection")
             return None
     
+    # Project-local custom emoji collections kept under main/boards/<name>/emoji
+    # (board assets stay out of managed_components and survive dependency reinstalls).
+    if project_root:
+        custom_path = os.path.join(project_root, 'main', 'boards',
+                                   default_emoji_collection, 'emoji')
+        if os.path.isdir(custom_path):
+            return custom_path
+
     # Try PNG emoji collections first.
     emoji_path = os.path.join(noto_fonts_path, 'png', default_emoji_collection)
     if os.path.exists(emoji_path):
